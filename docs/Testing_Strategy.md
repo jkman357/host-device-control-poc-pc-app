@@ -14,3 +14,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Evidence rules
 
 Each executable test run prints software candidate, base commit, protocol version, runtime, OS, and simulator identity. Simulator results are software evidence only and cannot substitute for physical transport, MCU timing, electrical, or safety validation. Failures must not be converted into passing evidence by retry without recording the original result and cause.
+## Repository-validator portability
+
+Repository-relative paths used by policy allowlists must be normalized to POSIX-style separators before comparison. This keeps the same validation result on Windows and POSIX runners and prevents platform-specific false positives.
+

@@ -5,7 +5,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.2.2
+- Candidate version: 0.2.3
 - Implementation base: `84bbc16f02a864084b1270db40b58460ad691e35`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
@@ -61,7 +61,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.2.2 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.2.3 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 

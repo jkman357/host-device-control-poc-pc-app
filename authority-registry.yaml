@@ -3,7 +3,7 @@
 
 registry_version: 2
 project: host-device-control-poc-pc-app
-candidate_version: 0.2.2
+candidate_version: 0.2.3
 status: engineering_rules_aligned_candidate
 implementation_base_commit: 84bbc16f02a864084b1270db40b58460ad691e35
 

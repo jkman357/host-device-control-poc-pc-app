@@ -56,16 +56,19 @@ def main() -> int:
         for name in self_referential_constants
     )
 
+    approved_async_void_files = {
+        "src/HostDeviceControl.App/MainWindow.xaml.cs",
+    }
     async_void_files: list[str] = []
     for path in ROOT.rglob("*.cs"):
         if any(part in EXCLUDED_PARTS for part in path.parts):
             continue
         text = path.read_text(encoding="utf-8-sig")
         if "async void" in text:
-            relative = str(path.relative_to(ROOT))
-            if relative not in {
-                "src/HostDeviceControl.App/MainWindow.xaml.cs",
-            }:
+            # Use repository-style separators so the allowlist behaves the same
+            # on Windows and POSIX runners.
+            relative = path.relative_to(ROOT).as_posix()
+            if relative not in approved_async_void_files:
                 async_void_files.append(relative)
     errors.extend(f"unapproved async void boundary: {name}" for name in async_void_files)
 

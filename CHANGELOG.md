@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — Cross-platform source-policy validation fix
+
+- Normalized repository-relative paths with `Path.as_posix()` before comparing the approved `async void` boundary allowlist.
+- Fixed the Windows GitHub Actions false positive for `MainWindow.xaml.cs`.
+- Kept the approved WPF shutdown event boundary and all runtime behavior unchanged.
+
 ## 0.2.2 — Core compilation and explicit interface-accessibility fix
 
 - Added the missing `System.Threading` import required by `Timeout.InfiniteTimeSpan`.

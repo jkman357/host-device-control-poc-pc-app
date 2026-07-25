@@ -6,7 +6,7 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.2.2 engineering-rules-aligned candidate** based on repository commit `84bbc16f02a864084b1270db40b58460ad691e35`.
+**v0.2.3 engineering-rules-aligned candidate** based on repository commit `84bbc16f02a864084b1270db40b58460ad691e35`.
 
 This revision explicitly adopts five engineering documents from `host-device-control-framework` commit `7a68980ef5faa2e897a3574af121683d65f74638`:
 
