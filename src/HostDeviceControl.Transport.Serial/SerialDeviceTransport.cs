@@ -19,6 +19,7 @@ public sealed class SerialDeviceTransport : IDeviceTransport
     private const int WriteTimeoutMilliseconds = 1000;
     private const int ReadBufferSizeBytes = 8192;
     private const int WriteBufferSizeBytes = 2048;
+    private static readonly TimeSpan DisposalTimeout = TimeSpan.FromSeconds(2);
 
     private readonly SerialTransportOptions _options;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
@@ -95,9 +96,10 @@ public sealed class SerialDeviceTransport : IDeviceTransport
             }
 
             await Task.Run(
-                () => CloseAndDispose(serialPort),
-                CancellationToken.None).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+                    () => CloseAndDispose(serialPort),
+                    CancellationToken.None)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
         }
         finally
         {
@@ -177,7 +179,9 @@ public sealed class SerialDeviceTransport : IDeviceTransport
             return;
         }
 
-        await DisconnectAsync(CancellationToken.None).ConfigureAwait(false);
+        using var disposalCancellation = new CancellationTokenSource(
+            DisposalTimeout);
+        await DisconnectAsync(disposalCancellation.Token).ConfigureAwait(false);
         _lifecycleGate.Dispose();
         _disposed = true;
     }

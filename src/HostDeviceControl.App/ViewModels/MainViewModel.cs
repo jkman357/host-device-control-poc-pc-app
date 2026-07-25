@@ -367,7 +367,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await session.ConnectAsync(cancellationToken);
 
             UpdateDeviceSummary();
-            StatusMessage = "Connected and ready.";
+            StatusMessage = $"Connected. Device state: {session.DeviceState}.";
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)

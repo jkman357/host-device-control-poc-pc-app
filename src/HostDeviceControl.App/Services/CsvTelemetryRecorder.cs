@@ -21,6 +21,7 @@ public sealed class CsvTelemetryRecorder : IAsyncDisposable
     private const int QueueCapacity = 4096;
     private const int FileBufferSizeBytes = 65536;
     private const int RowsPerFlush = 200;
+    private static readonly TimeSpan DisposalTimeout = TimeSpan.FromSeconds(5);
 
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
     private Channel<TelemetrySample>? _channel;
@@ -263,7 +264,9 @@ public sealed class CsvTelemetryRecorder : IAsyncDisposable
             return;
         }
 
-        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        using var disposalCancellation = new CancellationTokenSource(
+            DisposalTimeout);
+        await StopAsync(disposalCancellation.Token).ConfigureAwait(false);
         _lifecycleGate.Dispose();
         _disposed = true;
     }

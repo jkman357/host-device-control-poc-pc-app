@@ -149,11 +149,19 @@ public sealed class DeviceSession : IAsyncDisposable
                 MessageType.DeviceInfo).ConfigureAwait(false);
 
             DeviceInfo = PayloadCodec.DecodeDeviceInfo(response.Payload.Span);
+
+            await SendRequestAsync(
+                generation,
+                MessageType.Ping,
+                [],
+                _options.CommandTimeout,
+                cancellationToken,
+                MessageType.Ack).ConfigureAwait(false);
+
+            SynchronizeSessionStateFromDevice();
             PublishDiagnostic(
                 $"Handshake completed: {DeviceInfo.DeviceName} FW " +
-                $"{DeviceInfo.FirmwareVersion}.");
-            SetDeviceState(DeviceOperatingState.Idle);
-            SetState(DeviceSessionState.Ready);
+                $"{DeviceInfo.FirmwareVersion}; state={DeviceState}.");
         }
         catch
         {
@@ -161,7 +169,9 @@ public sealed class DeviceSession : IAsyncDisposable
 
             try
             {
-                await DisconnectCoreAsync(CancellationToken.None)
+                using var cleanupCancellation = new CancellationTokenSource(
+                    _options.ReceiveLoopShutdownTimeout);
+                await DisconnectCoreAsync(cleanupCancellation.Token)
                     .ConfigureAwait(false);
             }
             catch (Exception cleanupException)
@@ -243,6 +253,11 @@ public sealed class DeviceSession : IAsyncDisposable
             SetState(DeviceSessionState.Streaming);
             PublishDiagnostic($"Streaming started at {intervalUs} us interval.");
         }
+        catch (OperationCanceledException)
+        {
+            SynchronizeSessionStateFromDevice();
+            throw;
+        }
         catch (DeviceCommandException)
         {
             SynchronizeSessionStateFromDevice();
@@ -283,6 +298,11 @@ public sealed class DeviceSession : IAsyncDisposable
 
             SetState(DeviceSessionState.Ready);
             PublishDiagnostic("Streaming stopped.");
+        }
+        catch (OperationCanceledException)
+        {
+            SynchronizeSessionStateFromDevice();
+            throw;
         }
         catch (DeviceCommandException)
         {
@@ -519,23 +539,6 @@ public sealed class DeviceSession : IAsyncDisposable
                 out PendingRequest? pendingRequest) &&
             (pendingRequest.Generation == generation))
         {
-            if (frame.MessageType is MessageType.Ack or MessageType.Nack)
-            {
-                try
-                {
-                    CommandResponseStatus responseStatus =
-                        PayloadCodec.DecodeCommandResponse(
-                            frame.MessageType,
-                            frame.Payload.Span);
-                    SetDeviceState(responseStatus.DeviceState);
-                }
-                catch (ProtocolException exception)
-                {
-                    pendingRequest.Completion.TrySetException(exception);
-                    return;
-                }
-            }
-
             if (pendingRequest.Completion.TrySetResult(frame))
             {
                 RememberCompletedResponse(frame.Sequence);
@@ -705,7 +708,7 @@ public sealed class DeviceSession : IAsyncDisposable
         PublishDiagnostic("Disconnected.");
     }
 
-    private static void ValidateResponse(
+    private void ValidateResponse(
         MessageType requestType,
         ProtocolFrame response,
         MessageType[] validResponseTypes)
@@ -716,11 +719,19 @@ public sealed class DeviceSession : IAsyncDisposable
                 PayloadCodec.DecodeCommandResponse(
                     response.MessageType,
                     response.Payload.Span);
+
+            if (rejected.RequestType != requestType)
+            {
+                throw new ProtocolException(
+                    $"NACK does not match request {requestType}.");
+            }
+
+            SetDeviceState(rejected.DeviceState);
             throw new DeviceCommandException(
-                rejected.RequestType,
+                requestType,
                 rejected.ResultCode,
                 rejected.DeviceState,
-                $"Device rejected {rejected.RequestType}: " +
+                $"Device rejected {requestType}: " +
                 $"{rejected.ResultCode} while {rejected.DeviceState}.");
         }
 
@@ -768,6 +779,8 @@ public sealed class DeviceSession : IAsyncDisposable
                     $"ACK state {acknowledged.DeviceState} does not match " +
                     $"the expected state {expectedState.Value} for {requestType}.");
             }
+
+            SetDeviceState(acknowledged.DeviceState);
         }
     }
 
@@ -1058,8 +1071,14 @@ public sealed class DeviceSession : IAsyncDisposable
             return;
         }
 
-        await DisconnectAsync(CancellationToken.None).ConfigureAwait(false);
-        await _transport.DisposeAsync().ConfigureAwait(false);
+        using var disposalCancellation = new CancellationTokenSource(
+            _options.ReceiveLoopShutdownTimeout);
+        CancellationToken disposalToken = disposalCancellation.Token;
+
+        await DisconnectAsync(disposalToken).ConfigureAwait(false);
+        await _transport.DisposeAsync().AsTask()
+            .WaitAsync(disposalToken)
+            .ConfigureAwait(false);
         _lifecycleGate.Dispose();
         _disposed = true;
     }

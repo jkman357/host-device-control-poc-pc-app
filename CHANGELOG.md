@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2 - 2026-07-25
+
+- fixed CI naming-policy overlap between private instance fields, constants, and static readonly fields;
+- updated GitHub Actions to Node.js 24-compatible major versions;
+- validated ACK and NACK request IDs before applying authoritative device state;
+- synchronized reconnect state with a PING handshake instead of assuming Idle;
+- preserved Ready/Streaming state for caller cancellation instead of forcing Faulted;
+- bounded session, recorder, and serial-transport disposal waits;
+- added regression tests for response correlation, reconnect state, and cancellation recovery.
+
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## 0.3.1 — Build portability and analyzer cleanup

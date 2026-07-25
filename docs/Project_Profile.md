@@ -5,8 +5,8 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.3.1
-- Implementation base: `432d0f5863698bb7d5ed2ad337d02f690f4175b8`
+- Candidate version: 0.3.2
+- Implementation base: `6a8d3f729ae7a9bea6ba819e391c6c75f8145e11`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
 - Protocol authority: `host-device-control-poc-system/protocol/protocol.yaml` v0.1.0 at `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`; local exact mirror in `protocol/protocol.yaml`
@@ -62,7 +62,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.3.1 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.3.2 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 

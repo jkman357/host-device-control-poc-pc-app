@@ -13,5 +13,5 @@ protocol_authority:
   sha256: 7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e
 implementation:
   repository: host-device-control-poc-pc-app
-  base_commit: 432d0f5863698bb7d5ed2ad337d02f690f4175b8
+  base_commit: 6a8d3f729ae7a9bea6ba819e391c6c75f8145e11
   alignment_status: implementation_candidate_pending_ci_and_hardware_evidence

@@ -12,10 +12,10 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <WarningLevel>7</WarningLevel>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>0.3.1</Version>
-    <AssemblyVersion>0.3.1.0</AssemblyVersion>
-    <FileVersion>0.3.1.0</FileVersion>
-    <InformationalVersion>0.3.1-system-protocol-alignment-candidate</InformationalVersion>
+    <Version>0.3.2</Version>
+    <AssemblyVersion>0.3.2.0</AssemblyVersion>
+    <FileVersion>0.3.2.0</FileVersion>
+    <InformationalVersion>0.3.2-ci-response-correlation-hardening-candidate</InformationalVersion>
     <Authors>Ray Yang</Authors>
     <Copyright>Copyright © 2026 Ray Yang. All rights reserved.</Copyright>
     <RepositoryUrl>https://github.com/jkman357/host-device-control-poc-pc-app</RepositoryUrl>

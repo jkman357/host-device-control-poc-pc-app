@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.1 system-protocol-alignment candidate**, implemented from PC application commit
-`432d0f5863698bb7d5ed2ad337d02f690f4175b8`.
+**v0.3.2 CI and response-correlation hardening candidate**, based on PC application commit
+`6a8d3f729ae7a9bea6ba819e391c6c75f8145e11`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -34,6 +34,8 @@ system protocol to `verified_baseline`.
 - idle/streaming Node state model with command-state enforcement;
 - DEVICE_INFO, DEVICE_STATUS, TELEMETRY_SAMPLE, and ERROR_REPORT decoding;
 - non-zero host command sequences and independent unsolicited message sequences;
+- validated ACK/NACK request correlation before authoritative Node-state updates;
+- connection handshake state synchronization through PING;
 - duplicate direct-response suppression and unmatched-sequence diagnostics;
 - 1000 ms default command timeout, 1500 ms STOP_STREAM timeout, and 250 ms partial-frame timeout;
 - strict payload length, enum, UTF-8, finite-float, and stream-range validation;

@@ -6,7 +6,9 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
+using HostDeviceControl.Core.Abstractions;
 using HostDeviceControl.Core.Concurrency;
 using HostDeviceControl.Core.Device;
 using HostDeviceControl.Core.Models;
@@ -48,6 +50,11 @@ internal static class Program
         await RunAsync("Fake unknown-command NACK", TestFakeUnknownCommandNackAsync);
         await RunAsync("Fake CRC fault injection", TestFakeCrcFaultAsync);
         await RunAsync("Fake sample-loss injection", TestFakeSampleLossAsync);
+        await RunAsync("Streaming-state reconnect", TestStreamingStateReconnectAsync);
+        await RunAsync("Mismatched ACK correlation", TestMismatchedAckCorrelationAsync);
+        await RunAsync("Mismatched NACK correlation", TestMismatchedNackCorrelationAsync);
+        await RunAsync("Start cancellation recovery", TestStartCancellationRecoveryAsync);
+        await RunAsync("Stop cancellation recovery", TestStopCancellationRecoveryAsync);
         await RunAsync("Command timeout", TestCommandTimeoutAsync);
         await RunAsync("Command cancellation", TestCommandCancellationAsync);
 
@@ -71,12 +78,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.1");
-        Console.WriteLine("Repository base: 432d0f5863698bb7d5ed2ad337d02f690f4175b8");
+        Console.WriteLine("Software candidate: 0.3.2");
+        string testedCommit =
+            Environment.GetEnvironmentVariable("GITHUB_SHA") ??
+            "uncommitted-local-package";
+        Console.WriteLine($"Tested commit: {testedCommit}");
+        Console.WriteLine(
+            "Implementation base: " +
+            "6a8d3f729ae7a9bea6ba819e391c6c75f8145e11");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.1");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.2");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -378,6 +391,88 @@ internal static class Program
         AssertTrue(session.LostSampleCount > 0);
     }
 
+
+    private static async Task TestStreamingStateReconnectAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            initialState: DeviceOperatingState.Streaming);
+        await using var session = new DeviceSession(transport);
+
+        await session.ConnectAsync(CancellationToken.None);
+
+        AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
+        AssertEqual(DeviceSessionState.Streaming, session.State);
+        await session.DisconnectAsync(CancellationToken.None);
+    }
+
+    private static async Task TestMismatchedAckCorrelationAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            mismatchedResponseFor: MessageType.SetStreamConfig);
+        await using var session = new DeviceSession(transport);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await AssertThrowsAsync<ProtocolException>(
+            () => session.StartStreamingAsync(
+                ProtocolConstants.DefaultStreamIntervalUs,
+                CancellationToken.None));
+
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+    }
+
+    private static async Task TestMismatchedNackCorrelationAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            mismatchedResponseFor: MessageType.SetStreamConfig,
+            useNackForMismatch: true);
+        await using var session = new DeviceSession(transport);
+        await session.ConnectAsync(CancellationToken.None);
+
+        await AssertThrowsAsync<ProtocolException>(
+            () => session.StartStreamingAsync(
+                ProtocolConstants.DefaultStreamIntervalUs,
+                CancellationToken.None));
+
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+    }
+
+    private static async Task TestStartCancellationRecoveryAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            delayedRequest: MessageType.SetStreamConfig);
+        await using var session = new DeviceSession(transport);
+        await session.ConnectAsync(CancellationToken.None);
+        using var cancellation = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+
+        await AssertThrowsAsync<OperationCanceledException>(
+            () => session.StartStreamingAsync(
+                ProtocolConstants.DefaultStreamIntervalUs,
+                cancellation.Token));
+
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertEqual(DeviceSessionState.Ready, session.State);
+    }
+
+    private static async Task TestStopCancellationRecoveryAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            delayedRequest: MessageType.StopStream);
+        await using var session = new DeviceSession(transport);
+        await session.ConnectAsync(CancellationToken.None);
+        await session.StartStreamingAsync(
+            ProtocolConstants.DefaultStreamIntervalUs,
+            CancellationToken.None);
+        using var cancellation = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+
+        await AssertThrowsAsync<OperationCanceledException>(
+            () => session.StopStreamingAsync(cancellation.Token));
+
+        AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
+        AssertEqual(DeviceSessionState.Streaming, session.State);
+    }
+
     private static async Task TestCommandTimeoutAsync()
     {
         var transportOptions = new FakeDeviceTransportOptions
@@ -603,4 +698,168 @@ internal static class Program
         throw new InvalidOperationException(
             $"Expected {typeof(TException).Name}.");
     }
+    private sealed class ScriptedDeviceTransport : IDeviceTransport
+    {
+        private const int ReceiveCapacity = 4096;
+        private readonly Channel<byte> _receiveBytes =
+            Channel.CreateBounded<byte>(ReceiveCapacity);
+        private readonly FrameDecoder _decoder = new();
+        private readonly DeviceOperatingState _initialState;
+        private readonly MessageType? _mismatchedResponseFor;
+        private readonly bool _useNackForMismatch;
+        private readonly MessageType? _delayedRequest;
+        private DeviceOperatingState _state;
+        private bool _disposed;
+
+        public ScriptedDeviceTransport(
+            DeviceOperatingState initialState = DeviceOperatingState.Idle,
+            MessageType? mismatchedResponseFor = null,
+            bool useNackForMismatch = false,
+            MessageType? delayedRequest = null)
+        {
+            _initialState = initialState;
+            _state = initialState;
+            _mismatchedResponseFor = mismatchedResponseFor;
+            _useNackForMismatch = useNackForMismatch;
+            _delayedRequest = delayedRequest;
+        }
+
+        public bool IsConnected { get; private set; }
+
+        public Task ConnectAsync(CancellationToken cancellationToken)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            cancellationToken.ThrowIfCancellationRequested();
+            IsConnected = true;
+            _state = _initialState;
+            return Task.CompletedTask;
+        }
+
+        public Task DisconnectAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            IsConnected = false;
+            _receiveBytes.Writer.TryComplete();
+            return Task.CompletedTask;
+        }
+
+        public async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken)
+        {
+            byte first = await _receiveBytes.Reader
+                .ReadAsync(cancellationToken)
+                .ConfigureAwait(false);
+            buffer.Span[0] = first;
+            int count = 1;
+
+            while ((count < buffer.Length) &&
+                   _receiveBytes.Reader.TryRead(out byte value))
+            {
+                buffer.Span[count] = value;
+                count++;
+            }
+
+            return count;
+        }
+
+        public async ValueTask WriteAsync(
+            ReadOnlyMemory<byte> data,
+            CancellationToken cancellationToken)
+        {
+            _decoder.Append(data.Span);
+            if (!_decoder.TryRead(out ProtocolFrame? request) || request is null)
+            {
+                throw new ProtocolException("Scripted transport received an incomplete request.");
+            }
+
+            if (_delayedRequest == request.MessageType)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            ProtocolFrame response = CreateResponse(request);
+            byte[] encoded = FrameEncoder.Encode(response);
+            foreach (byte value in encoded)
+            {
+                await _receiveBytes.Writer
+                    .WriteAsync(value, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        private ProtocolFrame CreateResponse(ProtocolFrame request)
+        {
+            if (request.MessageType == MessageType.GetDeviceInfo)
+            {
+                var info = new DeviceInfo(
+                    0x4460,
+                    0,
+                    3,
+                    2,
+                    1000,
+                    "Scripted Node");
+                return new ProtocolFrame(
+                    ProtocolConstants.WireVersion,
+                    MessageType.DeviceInfo,
+                    request.Sequence,
+                    PayloadCodec.EncodeDeviceInfo(info));
+            }
+
+            if (_mismatchedResponseFor == request.MessageType)
+            {
+                MessageType wrongRequest = request.MessageType == MessageType.StartStream
+                    ? MessageType.StopStream
+                    : MessageType.StartStream;
+                MessageType responseType = _useNackForMismatch
+                    ? MessageType.Nack
+                    : MessageType.Ack;
+                ResultCode result = _useNackForMismatch
+                    ? ResultCode.InvalidState
+                    : ResultCode.Ok;
+                return new ProtocolFrame(
+                    ProtocolConstants.WireVersion,
+                    responseType,
+                    request.Sequence,
+                    PayloadCodec.EncodeCommandResponse(
+                        wrongRequest,
+                        result,
+                        DeviceOperatingState.Streaming));
+            }
+
+            _state = request.MessageType switch
+            {
+                MessageType.StartStream => DeviceOperatingState.Streaming,
+                MessageType.StopStream => DeviceOperatingState.Idle,
+                _ => _state
+            };
+
+            return new ProtocolFrame(
+                ProtocolConstants.WireVersion,
+                MessageType.Ack,
+                request.Sequence,
+                PayloadCodec.EncodeCommandResponse(
+                    request.MessageType,
+                    ResultCode.Ok,
+                    _state));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (IsConnected)
+            {
+                await DisconnectAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+
+            _disposed = true;
+        }
+    }
+
 }
