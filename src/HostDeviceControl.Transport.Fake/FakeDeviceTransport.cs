@@ -26,13 +26,15 @@ public sealed class FakeDeviceTransport : IDeviceTransport
 
     private readonly FakeDeviceTransportOptions _options;
     private readonly Channel<byte> _receiveBytes;
-    private readonly FrameDecoder _hostFrameDecoder = new();
+    private readonly FrameDecoder _hostFrameDecoder = new(
+        allowUnknownMessageTypes: true);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     private CancellationTokenSource? _streamCancellation;
     private Task? _streamTask;
     private ushort _streamIntervalUs = ProtocolConstants.DefaultStreamIntervalUs;
     private ushort _deviceFrameSequence;
+    private DeviceOperatingState _deviceState = DeviceOperatingState.Idle;
     private uint _sampleCounter;
     private uint _deviceTickUs;
     private int _isConnectedValue;
@@ -172,10 +174,22 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         switch (frame.MessageType)
         {
             case MessageType.Ping:
+                if (!await ValidateEmptyPayloadAsync(frame, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    break;
+                }
+
                 await SendAckAsync(frame, cancellationToken).ConfigureAwait(false);
                 break;
 
             case MessageType.GetDeviceInfo:
+                if (!await ValidateEmptyPayloadAsync(frame, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    break;
+                }
+
                 await SendDeviceInfoAsync(frame.Sequence, cancellationToken)
                     .ConfigureAwait(false);
                 break;
@@ -186,6 +200,12 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 break;
 
             case MessageType.StartStream:
+                if (!await ValidateEmptyPayloadAsync(frame, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    break;
+                }
+
                 if (_streamTask is not null)
                 {
                     await SendNackAsync(
@@ -195,6 +215,8 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 }
                 else
                 {
+                    _deviceState = DeviceOperatingState.Streaming;
+                    ResetStreamCounters();
                     await SendAckAsync(frame, cancellationToken).ConfigureAwait(false);
                     StartStreaming();
                 }
@@ -202,6 +224,12 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 break;
 
             case MessageType.StopStream:
+                if (!await ValidateEmptyPayloadAsync(frame, cancellationToken)
+                        .ConfigureAwait(false))
+                {
+                    break;
+                }
+
                 if (_streamTask is null)
                 {
                     await SendNackAsync(
@@ -212,6 +240,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 else
                 {
                     await StopStreamingAsync().ConfigureAwait(false);
+                    _deviceState = DeviceOperatingState.Idle;
                     await SendAckAsync(frame, cancellationToken).ConfigureAwait(false);
                 }
 
@@ -224,6 +253,22 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                     cancellationToken).ConfigureAwait(false);
                 break;
         }
+    }
+
+    private async Task<bool> ValidateEmptyPayloadAsync(
+        ProtocolFrame frame,
+        CancellationToken cancellationToken)
+    {
+        if (frame.Payload.IsEmpty)
+        {
+            return true;
+        }
+
+        await SendNackAsync(
+            frame,
+            ResultCode.InvalidLength,
+            cancellationToken).ConfigureAwait(false);
+        return false;
     }
 
     private async Task HandleSetStreamConfigAsync(
@@ -295,7 +340,10 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             ProtocolConstants.WireVersion,
             MessageType.Ack,
             request.Sequence,
-            PayloadCodec.EncodeAck(request.MessageType, ResultCode.Ok));
+            PayloadCodec.EncodeCommandResponse(
+                request.MessageType,
+                ResultCode.Ok,
+                _deviceState));
         return QueueFrameAsync(response, corruptCrc: false, cancellationToken);
     }
 
@@ -308,8 +356,22 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             ProtocolConstants.WireVersion,
             MessageType.Nack,
             request.Sequence,
-            PayloadCodec.EncodeAck(request.MessageType, resultCode));
+            MessageTypeValidator.IsHostCommand(request.MessageType)
+                ? PayloadCodec.EncodeCommandResponse(
+                    request.MessageType,
+                    resultCode,
+                    _deviceState)
+                : PayloadCodec.EncodeRawNack(
+                    (byte)request.MessageType,
+                    resultCode,
+                    _deviceState));
         return QueueFrameAsync(response, corruptCrc: false, cancellationToken);
+    }
+
+    private void ResetStreamCounters()
+    {
+        _sampleCounter = 0;
+        _deviceTickUs = 0;
     }
 
     private void StartStreaming()
@@ -386,7 +448,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 _sampleCounter,
                 _deviceTickUs,
                 value,
-                0,
+                (ushort)DeviceStatusBits.None,
                 DateTimeOffset.UtcNow);
             var frame = new ProtocolFrame(
                 ProtocolConstants.WireVersion,

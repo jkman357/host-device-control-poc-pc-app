@@ -13,6 +13,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+TEXT_SUFFIXES = {
+    ".cs", ".csx", ".xaml", ".xml", ".csproj", ".props", ".targets",
+    ".md", ".yaml", ".yml", ".json", ".ps1", ".py", ".sln",
+    ".slnlaunch", ".txt",
+}
+TEXT_FILENAMES = {".editorconfig", ".gitattributes", ".gitignore", "LICENSE"}
+EXCLUDED_PARTS = {".git", "bin", "obj"}
+
+
 
 def run(script_name: str) -> int:
     result = subprocess.run(
@@ -21,6 +30,22 @@ def run(script_name: str) -> int:
         check=False,
     )
     return result.returncode
+
+
+
+def validate_line_endings() -> list[str]:
+    """Require LF for repository text so dotnet format is deterministic."""
+    errors: list[str] = []
+    for path in ROOT.rglob("*"):
+        if not path.is_file() or any(part in EXCLUDED_PARTS for part in path.parts):
+            continue
+        if path.name not in TEXT_FILENAMES and path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        if b"\r" in path.read_bytes():
+            errors.append(
+                f"non-LF line ending: {path.relative_to(ROOT).as_posix()}"
+            )
+    return errors
 
 
 def validate_xml() -> list[str]:
@@ -36,6 +61,7 @@ def validate_xml() -> list[str]:
 
 def validate_required_files() -> list[str]:
     required = [
+        ".gitattributes",
         "authority-registry.yaml",
         "docs/Engineering_Rules_Adoption.md",
         "docs/Project_Profile.md",
@@ -44,13 +70,15 @@ def validate_required_files() -> list[str]:
         "docs/Testing_Strategy.md",
         "docs/Fake_Device_Simulator_Profile.md",
         "docs/Conformance_Assessment.md",
+        "protocol/authority-lock.yaml",
         "protocol/protocol.yaml",
+        "protocol/test-vectors/protocol-v0.1.0-vectors.json",
     ]
     return [f"missing required file: {name}" for name in required if not (ROOT / name).is_file()]
 
 
 def main() -> int:
-    errors = validate_required_files() + validate_xml()
+    errors = validate_required_files() + validate_xml() + validate_line_endings()
     if run("validate_protocol_contract.py") != 0:
         errors.append("protocol contract validator failed")
     if run("validate_source_headers.py") != 0:

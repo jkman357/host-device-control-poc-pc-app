@@ -31,14 +31,21 @@ internal static class Program
         Run("CRC standard vector", TestCrcStandardVector);
         Run("Frame round trip", TestFrameRoundTrip);
         Run("Known PING vector", TestKnownPingVector);
+        Run("Known ACK vector", TestKnownAckVector);
         Run("Fragmented frame", TestFragmentedFrame);
         Run("Noise resynchronization", TestNoiseResynchronization);
         Run("CRC rejection", TestCrcRejection);
         Run("Unknown message rejection", TestUnknownMessageRejection);
         Run("Malformed ACK rejection", TestMalformedAckRejection);
+        Run("Partial-frame timeout discard", TestPartialFrameTimeoutDiscard);
+        Run("Device status codec", TestDeviceStatusCodec);
+        Run("Error report codec", TestErrorReportCodec);
         Run("Non-finite telemetry rejection", TestNonFiniteTelemetryRejection);
         Run("Bounded UI buffer policy", TestBoundedDropOldestBuffer);
         await RunAsync("Fake device happy path", TestFakeDeviceSessionAsync);
+        await RunAsync("Fake invalid-length NACK", TestFakeInvalidLengthNackAsync);
+        await RunAsync("Fake unsupported-version NACK", TestFakeUnsupportedVersionNackAsync);
+        await RunAsync("Fake unknown-command NACK", TestFakeUnknownCommandNackAsync);
         await RunAsync("Fake CRC fault injection", TestFakeCrcFaultAsync);
         await RunAsync("Fake sample-loss injection", TestFakeSampleLossAsync);
         await RunAsync("Command timeout", TestCommandTimeoutAsync);
@@ -64,12 +71,12 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.2.3");
-        Console.WriteLine("Repository base: 84bbc16f02a864084b1270db40b58460ad691e35");
-        Console.WriteLine("Protocol: protocol.yaml v0.1.0");
+        Console.WriteLine("Software candidate: 0.3.1");
+        Console.WriteLine("Repository base: 432d0f5863698bb7d5ed2ad337d02f690f4175b8");
+        Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.2.3");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.1");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -110,6 +117,21 @@ internal static class Program
             []);
         string actualHex = Convert.ToHexString(FrameEncoder.Encode(frame));
         AssertEqual("A55A0101010000005597", actualHex);
+    }
+
+
+    private static void TestKnownAckVector()
+    {
+        var frame = new ProtocolFrame(
+            ProtocolConstants.WireVersion,
+            MessageType.Ack,
+            1,
+            PayloadCodec.EncodeCommandResponse(
+                MessageType.Ping,
+                ResultCode.Ok,
+                DeviceOperatingState.Idle));
+        string actualHex = Convert.ToHexString(FrameEncoder.Encode(frame));
+        AssertEqual("A55A018001000300010000536F", actualHex);
     }
 
     private static void TestFragmentedFrame()
@@ -186,9 +208,46 @@ internal static class Program
     private static void TestMalformedAckRejection()
     {
         AssertThrows<ProtocolException>(
-            () => PayloadCodec.DecodeAck([0x7F, 0x00]));
+            () => PayloadCodec.DecodeCommandResponse(
+                MessageType.Ack,
+                [0x7F, 0x00, 0x00]));
         AssertThrows<ProtocolException>(
-            () => PayloadCodec.DecodeAck([(byte)MessageType.Ping, 0x7F]));
+            () => PayloadCodec.DecodeCommandResponse(
+                MessageType.Ack,
+                [(byte)MessageType.Ping, 0x7F, 0x00]));
+        AssertThrows<ProtocolException>(
+            () => PayloadCodec.DecodeCommandResponse(
+                MessageType.Ack,
+                [(byte)MessageType.Ping, 0x00, 0x7F]));
+    }
+
+
+    private static void TestPartialFrameTimeoutDiscard()
+    {
+        var decoder = new FrameDecoder();
+        decoder.Append([ProtocolConstants.StartOfFrame0, ProtocolConstants.StartOfFrame1]);
+        AssertEqual(2, decoder.BufferedByteCount);
+        decoder.DiscardPartialFrame();
+        AssertEqual(0, decoder.BufferedByteCount);
+        AssertEqual(1L, decoder.PartialFrameTimeoutCount);
+    }
+
+    private static void TestDeviceStatusCodec()
+    {
+        var expected = new DeviceStatus(
+            DeviceOperatingState.Streaming,
+            DeviceStatusBits.RxOverflowObserved | DeviceStatusBits.UartErrorObserved);
+        DeviceStatus actual = PayloadCodec.DecodeDeviceStatus(
+            PayloadCodec.EncodeDeviceStatus(expected));
+        AssertEqual(expected, actual);
+    }
+
+    private static void TestErrorReportCodec()
+    {
+        var expected = new DeviceErrorReport(0x1234, 0x89ABCDEF);
+        DeviceErrorReport actual = PayloadCodec.DecodeErrorReport(
+            PayloadCodec.EncodeErrorReport(expected));
+        AssertEqual(expected, actual);
     }
 
     private static void TestNonFiniteTelemetryRejection()
@@ -224,6 +283,77 @@ internal static class Program
         AssertEqual(0L, session.LostSampleCount);
     }
 
+    private static async Task TestFakeInvalidLengthNackAsync()
+    {
+        await using var transport = new FakeDeviceTransport();
+        await transport.ConnectAsync(CancellationToken.None);
+        var request = new ProtocolFrame(
+            ProtocolConstants.WireVersion,
+            MessageType.Ping,
+            21,
+            [0x00]);
+
+        await transport.WriteAsync(
+            FrameEncoder.Encode(request),
+            CancellationToken.None);
+        ProtocolFrame response = await ReadFrameAsync(transport);
+        AssertEqual(MessageType.Nack, response.MessageType);
+        AssertEqual(request.Sequence, response.Sequence);
+        CommandResponseStatus status = PayloadCodec.DecodeCommandResponse(
+            response.MessageType,
+            response.Payload.Span);
+        AssertEqual(MessageType.Ping, status.RequestType);
+        AssertEqual(ResultCode.InvalidLength, status.ResultCode);
+        AssertEqual(DeviceOperatingState.Idle, status.DeviceState);
+        await transport.DisconnectAsync(CancellationToken.None);
+    }
+
+    private static async Task TestFakeUnsupportedVersionNackAsync()
+    {
+        await using var transport = new FakeDeviceTransport();
+        await transport.ConnectAsync(CancellationToken.None);
+        var request = new ProtocolFrame(
+            0x02,
+            MessageType.Ping,
+            22,
+            []);
+
+        await transport.WriteAsync(
+            FrameEncoder.Encode(request),
+            CancellationToken.None);
+        ProtocolFrame response = await ReadFrameAsync(transport);
+        CommandResponseStatus status = PayloadCodec.DecodeCommandResponse(
+            response.MessageType,
+            response.Payload.Span);
+        AssertEqual(MessageType.Nack, response.MessageType);
+        AssertEqual(ResultCode.UnsupportedVersion, status.ResultCode);
+        AssertEqual(DeviceOperatingState.Idle, status.DeviceState);
+        await transport.DisconnectAsync(CancellationToken.None);
+    }
+
+    private static async Task TestFakeUnknownCommandNackAsync()
+    {
+        const byte UnknownRequestId = 0x7F;
+        await using var transport = new FakeDeviceTransport();
+        await transport.ConnectAsync(CancellationToken.None);
+        var request = new ProtocolFrame(
+            ProtocolConstants.WireVersion,
+            (MessageType)UnknownRequestId,
+            23,
+            []);
+
+        await transport.WriteAsync(
+            FrameEncoder.Encode(request),
+            CancellationToken.None);
+        ProtocolFrame response = await ReadFrameAsync(transport);
+        AssertEqual(MessageType.Nack, response.MessageType);
+        AssertEqual(request.Sequence, response.Sequence);
+        AssertSpanEqual<byte>(
+            [UnknownRequestId, (byte)ResultCode.InvalidCommand, (byte)DeviceOperatingState.Idle],
+            response.Payload.Span);
+        await transport.DisconnectAsync(CancellationToken.None);
+    }
+
     private static async Task TestFakeCrcFaultAsync()
     {
         var options = new FakeDeviceTransportOptions
@@ -256,6 +386,7 @@ internal static class Program
         };
         var sessionOptions = new DeviceSessionOptions
         {
+            GetDeviceInfoTimeout = TimeSpan.FromMilliseconds(TestCommandTimeoutMilliseconds),
             CommandTimeout = TimeSpan.FromMilliseconds(TestCommandTimeoutMilliseconds),
             StopStreamTimeout = TimeSpan.FromMilliseconds(TestStopTimeoutMilliseconds),
             ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(TestShutdownTimeoutMilliseconds),
@@ -277,6 +408,7 @@ internal static class Program
         };
         var sessionOptions = new DeviceSessionOptions
         {
+            GetDeviceInfoTimeout = TimeSpan.FromSeconds(2),
             CommandTimeout = TimeSpan.FromSeconds(2),
             StopStreamTimeout = TimeSpan.FromMilliseconds(TestStopTimeoutMilliseconds),
             ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(TestShutdownTimeoutMilliseconds),
@@ -306,16 +438,19 @@ internal static class Program
             await session.ConnectAsync(CancellationToken.None);
             AssertEqual(DeviceSessionState.Ready, session.State);
             AssertNotNull(session.DeviceInfo);
+            AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
 
             await session.StartStreamingAsync(
                 ProtocolConstants.DefaultStreamIntervalUs,
                 CancellationToken.None);
             await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
             AssertEqual(DeviceSessionState.Streaming, session.State);
+            AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
             AssertTrue(sampleCount >= requiredSampleCount);
 
             await session.StopStreamingAsync(CancellationToken.None);
             AssertEqual(DeviceSessionState.Ready, session.State);
+            AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
             await session.DisconnectAsync(CancellationToken.None);
             AssertEqual(DeviceSessionState.Disconnected, session.State);
         }
@@ -330,6 +465,24 @@ internal static class Program
             if (current >= requiredSampleCount)
             {
                 completion.TrySetResult(true);
+            }
+        }
+    }
+
+    private static async Task<ProtocolFrame> ReadFrameAsync(
+        FakeDeviceTransport transport)
+    {
+        var decoder = new FrameDecoder();
+        byte[] buffer = new byte[128];
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+
+        while (true)
+        {
+            int length = await transport.ReadAsync(buffer, cancellation.Token);
+            decoder.Append(buffer.AsSpan(0, length));
+            if (decoder.TryRead(out ProtocolFrame? frame) && frame is not null)
+            {
+                return frame;
             }
         }
     }

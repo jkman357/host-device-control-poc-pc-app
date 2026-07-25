@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -17,6 +18,10 @@ MESSAGE_ENUM_PATH = ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "Mess
 RESULT_ENUM_PATH = ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "ResultCode.cs"
 CONSTANTS_PATH = ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "ProtocolConstants.cs"
 VECTORS_PATH = ROOT / "protocol" / "test-vectors" / "protocol-v0.1.0-vectors.json"
+AUTHORITY_LOCK_PATH = ROOT / "protocol" / "authority-lock.yaml"
+STATE_ENUM_PATH = ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "DeviceOperatingState.cs"
+STATUS_FLAGS_PATH = ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "DeviceStatusBits.cs"
+EXPECTED_PROTOCOL_SHA256 = "7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e"
 
 
 def pascal_case(name: str) -> str:
@@ -90,6 +95,43 @@ def parse_csharp_constant(text: str, name: str) -> int:
 
 
 
+
+def parse_states(protocol_text: str) -> dict[str, int]:
+    block = protocol_text.split("\nstate_model:", 1)[1].split("\nmessages:", 1)[0]
+    pairs = re.findall(
+        r"name:\s*([a-z0-9_]+),\s*value:\s*(0x[0-9A-Fa-f]+)",
+        block,
+    )
+    return {pascal_case(name): int(value, 16) for name, value in pairs}
+
+
+def parse_status_flags(protocol_text: str) -> dict[str, int]:
+    block = protocol_text.split("\nstatus_flags:", 1)[1].split("\nhost_timeouts_ms:", 1)[0]
+    pairs = re.findall(
+        r"name:\s*([A-Z0-9_]+),\s*mask:\s*(0x[0-9A-Fa-f]+)",
+        block,
+    )
+    return {pascal_case(name): int(value, 16) for name, value in pairs}
+
+
+def validate_authority_lock(errors: list[str]) -> None:
+    actual_sha = hashlib.sha256(PROTOCOL_PATH.read_bytes()).hexdigest()
+    if actual_sha != EXPECTED_PROTOCOL_SHA256:
+        errors.append(
+            f"protocol authority SHA-256 mismatch: expected {EXPECTED_PROTOCOL_SHA256}, actual {actual_sha}"
+        )
+
+    lock_text = AUTHORITY_LOCK_PATH.read_text(encoding="utf-8")
+    required_fragments = (
+        "authority_commit: e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679",
+        f"sha256: {EXPECTED_PROTOCOL_SHA256}",
+        "base_commit: 432d0f5863698bb7d5ed2ad337d02f690f4175b8",
+    )
+    for fragment in required_fragments:
+        if fragment not in lock_text:
+            errors.append(f"authority-lock.yaml is missing: {fragment}")
+
+
 def crc16_ccitt_false(data: bytes) -> int:
     crc = 0xFFFF
     for value in data:
@@ -113,10 +155,16 @@ def validate_vectors(
         errors.append(f"test-vector file is invalid: {exc}")
         return
 
+    if document.get("protocol_version") != "0.1.0":
+        errors.append("test-vector protocol version does not match protocol.yaml")
+    if document.get("contract_status") != "candidate_for_alignment":
+        errors.append("test-vector contract status does not match protocol.yaml")
     if document.get("wire_version") != expected_wire_version:
-        errors.append(
-            "test-vector wire version does not match protocol.yaml"
-        )
+        errors.append("test-vector wire version does not match protocol.yaml")
+    if document.get("byte_order") != "little_endian":
+        errors.append("test-vector byte order must be little_endian")
+    if document.get("crc_storage") != "little_endian":
+        errors.append("test-vector CRC storage must be little_endian")
 
     known_ids = set(expected_message_ids.values())
     vectors = document.get("vectors")
@@ -191,6 +239,19 @@ def main() -> int:
         parse_csharp_enum(RESULT_ENUM_PATH),
         errors,
     )
+    require_equal(
+        "device states",
+        parse_states(protocol_text),
+        parse_csharp_enum(STATE_ENUM_PATH),
+        errors,
+    )
+    require_equal(
+        "status flags",
+        parse_status_flags(protocol_text),
+        parse_csharp_enum(STATUS_FLAGS_PATH),
+        errors,
+    )
+    validate_authority_lock(errors)
 
     sof_match = re.search(r"bytes:\s*\[(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+)\]", protocol_text)
     if sof_match is None:
@@ -202,12 +263,18 @@ def main() -> int:
     require_equal("wire version", parse_hex_scalar(protocol_text, "wire_version"), parse_csharp_constant(constants_text, "WireVersion"), errors)
     require_equal("maximum payload", parse_int_scalar(protocol_text, "maximum_payload_size_bytes"), parse_csharp_constant(constants_text, "MaximumPayloadSize"), errors)
     require_equal("telemetry payload", parse_int_scalar(protocol_text, "payload_size_bytes"), parse_csharp_constant(constants_text, "TelemetryPayloadSize"), errors)
+    require_equal("command response payload", 3, parse_csharp_constant(constants_text, "CommandResponsePayloadSize"), errors)
     require_equal("minimum frame", parse_int_scalar(protocol_text, "minimum_frame_size_bytes"), 10, errors)
 
     minimum, maximum, default = parse_stream_range(protocol_text)
     require_equal("minimum stream interval", minimum, parse_csharp_constant(constants_text, "MinimumStreamIntervalUs"), errors)
     require_equal("maximum stream interval", maximum, parse_csharp_constant(constants_text, "MaximumStreamIntervalUs"), errors)
     require_equal("default stream interval", default, parse_csharp_constant(constants_text, "DefaultStreamIntervalUs"), errors)
+
+    require_equal("get device info timeout", parse_int_scalar(protocol_text, "get_device_info"), parse_csharp_constant(constants_text, "GetDeviceInfoTimeoutMs"), errors)
+    require_equal("command timeout", parse_int_scalar(protocol_text, "command_default"), parse_csharp_constant(constants_text, "CommandDefaultTimeoutMs"), errors)
+    require_equal("stop stream timeout", parse_int_scalar(protocol_text, "stop_stream"), parse_csharp_constant(constants_text, "StopStreamTimeoutMs"), errors)
+    require_equal("partial frame timeout", parse_int_scalar(protocol_text, "partial_frame"), parse_csharp_constant(constants_text, "PartialFrameTimeoutMs"), errors)
 
     validate_vectors(
         parse_messages(protocol_text),

@@ -1,11 +1,24 @@
 # Copyright © 2026 Ray Yang. All rights reserved.
 # No license is granted. See LICENSE and NOTICE.md.
 
-registry_version: 2
+registry_version: 3
 project: host-device-control-poc-pc-app
-candidate_version: 0.2.3
-status: engineering_rules_aligned_candidate
-implementation_base_commit: 84bbc16f02a864084b1270db40b58460ad691e35
+candidate_version: 0.3.1
+status: system_protocol_alignment_candidate
+implementation_base_commit: 432d0f5863698bb7d5ed2ad337d02f690f4175b8
+
+project_protocol_authority:
+  repository: host-device-control-poc-system
+  path: protocol/protocol.yaml
+  authority_commit: e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679
+  reviewed_system_commit: e418afc3b3e866039c583a8ba4dc1a1049a9cec1
+  protocol_version: 0.1.0
+  wire_version: 0x01
+  status: candidate_for_alignment
+  sha256: 7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e
+  local_mirror: protocol/protocol.yaml
+  local_lock: protocol/authority-lock.yaml
+  rule: external_project_authority_precedes_implementation
 
 external_authority_source:
   repository: host-device-control-framework
@@ -32,24 +45,19 @@ external_authority_source:
       status: Draft for Review
       role: testing_topic_authority
 
-sources_of_truth:
-  - path: protocol/protocol.yaml
-    authority: project_communication_contract
-    applies_to: [pc_application, stm32f446re_firmware]
+local_authorities:
   - path: docs/Engineering_Rules_Adoption.md
     authority: project_authority_adoption
-    applies_to: [pc_application]
   - path: docs/Project_Profile.md
     authority: project_profile_and_deviations
-    applies_to: [pc_application]
   - path: docs/Architecture.md
     authority: pc_application_architecture
-    applies_to: [pc_application]
   - path: docs/Protocol_Decisions.md
-    authority: protocol_decision_rationale
-    applies_to: [pc_application, stm32f446re_firmware]
+    authority: implementation_alignment_rationale
 
 precedence:
+  - host-device-control-poc-system/protocol/protocol.yaml
+  - protocol/authority-lock.yaml
   - protocol/protocol.yaml
   - docs/Engineering_Rules_Adoption.md
   - docs/Project_Profile.md
@@ -58,11 +66,13 @@ precedence:
   - README.md
 
 human_approval_required_for:
-  - authority_source_change
+  - protocol_authority_commit_change
+  - protocol_mirror_hash_change
   - deviation_change
   - protocol_version_change
   - message_id_change
   - payload_layout_change
   - crc_parameter_change
   - release_conformance_claim
+  - verified_baseline_promotion
   - safety_or_product_reuse

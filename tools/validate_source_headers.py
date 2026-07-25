@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 COPYRIGHT = "Copyright © 2026 Ray Yang"
 CHECK_SUFFIXES = {".cs", ".xaml", ".csproj", ".props", ".targets", ".md", ".yaml", ".yml", ".ps1", ".py"}
 EXCLUDED_PARTS = {"bin", "obj", ".git"}
+EXTERNAL_AUTHORITY_FILES = {"protocol/protocol.yaml"}
 
 
 def candidate_files() -> list[Path]:
@@ -30,9 +31,12 @@ def candidate_files() -> list[Path]:
 def main() -> int:
     errors: list[str] = []
     for path in candidate_files():
+        relative = path.relative_to(ROOT).as_posix()
         text = path.read_text(encoding="utf-8-sig")
+        if relative in EXTERNAL_AUTHORITY_FILES:
+            continue
         if COPYRIGHT not in text[:800]:
-            errors.append(f"missing visible copyright header: {path.relative_to(ROOT)}")
+            errors.append(f"missing visible copyright header: {relative}")
 
     source_text = "\n".join(
         path.read_text(encoding="utf-8-sig")

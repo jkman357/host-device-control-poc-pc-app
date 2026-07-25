@@ -23,11 +23,11 @@
 
 ## Protocol cross-end validation
 
-- [ ] MCU and PC both identify protocol v0.1.0 / wire version 0x01.
+- [ ] Record system protocol authority commit `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679` and confirm both PC and MCU consume protocol v0.1.0 / wire version 0x01.
 - [ ] MCU implementation passes the shared frame vectors.
-- [ ] `GET_DEVICE_INFO`, `SET_STREAM_CONFIG`, `START_STREAM`, and `STOP_STREAM` sequences and payloads match.
+- [ ] PING, GET_DEVICE_INFO, SET_STREAM_CONFIG, START_STREAM, and STOP_STREAM sequences, payloads, allowed states, ACK/NACK Node state, and success transitions match.
 - [ ] CRC coverage, little-endian fields, payload limits, and strict lengths match.
-- [ ] Unknown IDs, malformed lengths, invalid state, and unsupported version behavior match the Project Protocol.
+- [ ] Unknown IDs, malformed command payloads, invalid state, unsupported version, duplicate response, unmatched sequence, and 250 ms partial-frame behavior match the Project Protocol.
 
 ## Sustained physical transport
 

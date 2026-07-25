@@ -40,4 +40,16 @@ public static class MessageTypeValidator
             MessageType.StartStream or
             MessageType.StopStream;
     }
+
+    /// <summary>
+    /// Returns whether a message type is a direct response that copies the
+    /// request sequence.
+    /// </summary>
+    public static bool IsDirectResponse(MessageType messageType)
+    {
+        return messageType is
+            MessageType.Ack or
+            MessageType.Nack or
+            MessageType.DeviceInfo;
+    }
 }

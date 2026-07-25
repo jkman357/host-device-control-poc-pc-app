@@ -24,10 +24,7 @@ public sealed class SerialTransportOptions
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(portName);
 
-        if (baudRate <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(baudRate));
-        }
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(baudRate);
 
         if ((dataBits < 5) || (dataBits > 8))
         {

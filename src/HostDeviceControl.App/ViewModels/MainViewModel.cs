@@ -76,6 +76,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private long _crcErrorCount;
     private long _formatErrorCount;
     private long _unknownMessageTypeCount;
+    private long _partialFrameTimeoutCount;
     private long _lostSampleCount;
     private long _uiDropCount;
     private int _uiQueueDepth;
@@ -265,6 +266,12 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _unknownMessageTypeCount, value);
     }
 
+    public long PartialFrameTimeoutCount
+    {
+        get => _partialFrameTimeoutCount;
+        private set => SetProperty(ref _partialFrameTimeoutCount, value);
+    }
+
     public long LostSampleCount
     {
         get => _lostSampleCount;
@@ -359,11 +366,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             StatusMessage = $"Connecting through {SelectedConnectionMode}...";
             await session.ConnectAsync(cancellationToken);
 
-            DeviceInfo? info = session.DeviceInfo;
-            DeviceSummary = info is null
-                ? "Connected"
-                : $"{info.DeviceName} | FW {info.FirmwareVersion} | " +
-                  $"Type 0x{info.DeviceType:X4}";
+            UpdateDeviceSummary();
             StatusMessage = "Connected and ready.";
         }
         catch (OperationCanceledException)
@@ -587,6 +590,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void SubscribeSession(DeviceSession session)
     {
         session.StateChanged += OnSessionStateChanged;
+        session.DeviceOperatingStateChanged += OnDeviceOperatingStateChanged;
+        session.DeviceStatusReceived += OnDeviceStatusReceived;
+        session.DeviceErrorReported += OnDeviceErrorReported;
         session.TelemetryReceived += OnTelemetryReceived;
         session.DiagnosticMessage += OnDiagnosticMessage;
     }
@@ -594,6 +600,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void UnsubscribeSession(DeviceSession session)
     {
         session.StateChanged -= OnSessionStateChanged;
+        session.DeviceOperatingStateChanged -= OnDeviceOperatingStateChanged;
+        session.DeviceStatusReceived -= OnDeviceStatusReceived;
+        session.DeviceErrorReported -= OnDeviceErrorReported;
         session.TelemetryReceived -= OnTelemetryReceived;
         session.DiagnosticMessage -= OnDiagnosticMessage;
     }
@@ -607,6 +616,40 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             OnPropertyChanged(nameof(IsSerialConfigurationEditable));
             RaiseCommandStates();
         });
+    }
+
+    private void OnDeviceOperatingStateChanged(DeviceOperatingState state)
+    {
+        PostToUi(UpdateDeviceSummary);
+    }
+
+    private void OnDeviceStatusReceived(DeviceStatus status)
+    {
+        _diagnosticBuffer.Enqueue(
+            $"DEVICE_STATUS state={status.State}, flags=0x{(ushort)status.StatusBits:X4}.");
+    }
+
+    private void OnDeviceErrorReported(DeviceErrorReport report)
+    {
+        _diagnosticBuffer.Enqueue(
+            $"ERROR_REPORT code=0x{report.ErrorCode:X4}, " +
+            $"detail=0x{report.Detail:X8}.");
+    }
+
+    private void UpdateDeviceSummary()
+    {
+        DeviceSession? session = _session;
+        DeviceInfo? info = session?.DeviceInfo;
+        if (session is null || info is null)
+        {
+            DeviceSummary = session is null ? "Not connected" : "Connected";
+            return;
+        }
+
+        string deviceState = session.DeviceState?.ToString() ?? "Unknown";
+        DeviceSummary =
+            $"{info.DeviceName} | FW {info.FirmwareVersion} | " +
+            $"Type 0x{info.DeviceType:X4} | State {deviceState}";
     }
 
     private void OnTelemetryReceived(TelemetrySample sample)
@@ -679,6 +722,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             CrcErrorCount = session.CrcErrorCount;
             FormatErrorCount = session.FormatErrorCount;
             UnknownMessageTypeCount = session.UnknownMessageTypeCount;
+            PartialFrameTimeoutCount = session.PartialFrameTimeoutCount;
             LostSampleCount = session.LostSampleCount;
         }
 

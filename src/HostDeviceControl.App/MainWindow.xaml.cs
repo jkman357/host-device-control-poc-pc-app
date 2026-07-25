@@ -3,6 +3,7 @@
 
 using System;
 using System.ComponentModel;
+using System.Threading.Tasks;
 using System.Windows;
 using HostDeviceControl.App.ViewModels;
 
@@ -11,7 +12,7 @@ namespace HostDeviceControl.App;
 /// <summary>
 /// Hosts the single-device PoC view and owns orderly UI shutdown.
 /// </summary>
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IAsyncDisposable
 {
     private readonly MainViewModel _viewModel;
     private bool _shutdownStarted;
@@ -23,6 +24,19 @@ public partial class MainWindow : Window
         _viewModel = new MainViewModel(Dispatcher);
         DataContext = _viewModel;
         Closing += OnClosing;
+    }
+
+    /// <summary>
+    /// Releases the view model and all session-owned resources.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_shutdownComplete)
+        {
+            return;
+        }
+
+        await _viewModel.DisposeAsync();
     }
 
     // Framework-required async event boundary. All exceptions are handled here.
@@ -43,7 +57,7 @@ public partial class MainWindow : Window
 
         try
         {
-            await _viewModel.DisposeAsync();
+            await DisposeAsync();
             _shutdownComplete = true;
             Closing -= OnClosing;
             Close();

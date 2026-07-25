@@ -4,18 +4,36 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## Candidate assessment
 
-The 0.2.3 candidate intentionally addresses the five adopted engineering documents through explicit authority adoption, Project profile, bounded queues, owned background tasks, generation-aware correlation, cancellation and timeout handling, WPF thread marshalling, command-state binding, visible overload/error counters, fault-injection tests, and repository validation.
+The 0.3.1 candidate implements the PC-side behavior of the external system protocol
+v0.1.0 pinned in `protocol/authority-lock.yaml`. The local YAML is validated by exact
+SHA-256, and derived C# message IDs, result codes, Node states, status flags, framing
+constants, timeouts, stream limits, and normative vectors are checked for drift.
+
+The implementation also retains the five adopted Coordinator/C# engineering documents
+through bounded work, explicit ownership, generation-aware request correlation,
+cancellation and timeout handling, WPF thread marshalling, visible overload/error
+counters, fault-injection tests, and repository validation.
+
+## Evidence already represented by this candidate
+
+- static protocol authority/provenance validation;
+- exact PING and ACK normative vector checks;
+- PC encoder/decoder and payload codec coverage;
+- idle/streaming state and ACK/NACK state handling;
+- bounded Fake Node command/telemetry integration;
+- partial-frame timeout, CRC rejection, sample-loss, command-timeout, and cancellation tests.
 
 ## Remaining acceptance gates
 
-- Controlled Windows restore/build with .NET 8 and Visual Studio.
-- Analyzer and warning review.
-- `dotnet format` verification.
-- Execution of the engineering test harness with retained output.
-- Manual WPF UI checklist.
-- Package-lock generation and locked restore.
-- Cross-language protocol vector validation by STM32 firmware.
-- Sustained physical serial test and disconnect/reconnect test.
-- Human architecture, code, protocol, and evidence review.
+- clean controlled Windows restore/build and analyzer review;
+- `dotnet format` verification and engineering test execution with retained output;
+- manual WPF UI checklist;
+- package-lock generation and locked restore;
+- MCU implementation from the same authority commit;
+- shared vector execution on both PC and MCU;
+- sustained physical serial interoperability and disconnect/reconnect evidence;
+- pinned PC and MCU implementation commits in the system repository;
+- human protocol, architecture, code, evidence, and baseline approval.
 
-Until these gates pass, the repository must be described as an engineering-rules-aligned PoC candidate, not a released or fully conforming product implementation.
+Until all system-level gates pass, the repository must be described as a
+**system-protocol-alignment candidate**, not a verified baseline or product implementation.

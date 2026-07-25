@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,7 @@ namespace HostDeviceControl.Core.Device;
 public sealed class DeviceSession : IAsyncDisposable
 {
     private const int MaximumPendingRequestCount = 8;
+    private const int RecentResponseCapacity = 64;
 
     private readonly IDeviceTransport _transport;
     private readonly DeviceSessionOptions _options;
@@ -27,10 +29,14 @@ public sealed class DeviceSession : IAsyncDisposable
     private FrameDecoder _decoder = new();
     private readonly ConcurrentDictionary<ushort, PendingRequest> _pendingResponses = new();
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
+    private readonly object _recentResponseGate = new();
+    private readonly Queue<ushort> _recentResponseOrder = new();
+    private readonly HashSet<ushort> _recentResponseSequences = [];
 
     private CancellationTokenSource? _receiveCancellation;
     private Task? _receiveTask;
     private int _stateValue = (int)DeviceSessionState.Disconnected;
+    private int _deviceStateValue = -1;
     private int _sequenceValue;
     private long _connectionGeneration;
     private long _receivedFrameCount;
@@ -64,6 +70,12 @@ public sealed class DeviceSession : IAsyncDisposable
     /// </summary>
     public event Action<TelemetrySample>? TelemetryReceived;
 
+    public event Action<DeviceOperatingState>? DeviceOperatingStateChanged;
+
+    public event Action<DeviceStatus>? DeviceStatusReceived;
+
+    public event Action<DeviceErrorReport>? DeviceErrorReported;
+
     /// <summary>
     /// Raised for bounded, single-line engineering diagnostics.
     /// </summary>
@@ -73,6 +85,15 @@ public sealed class DeviceSession : IAsyncDisposable
         (DeviceSessionState)Volatile.Read(ref _stateValue);
 
     public DeviceInfo? DeviceInfo { get; private set; }
+
+    public DeviceOperatingState? DeviceState
+    {
+        get
+        {
+            int value = Volatile.Read(ref _deviceStateValue);
+            return value < 0 ? null : (DeviceOperatingState)value;
+        }
+    }
 
     public long ConnectionGeneration =>
         Interlocked.Read(ref _connectionGeneration);
@@ -88,6 +109,8 @@ public sealed class DeviceSession : IAsyncDisposable
     public long FormatErrorCount => _decoder.FormatErrorCount;
 
     public long UnknownMessageTypeCount => _decoder.UnknownMessageTypeCount;
+
+    public long PartialFrameTimeoutCount => _decoder.PartialFrameTimeoutCount;
 
     /// <summary>
     /// Opens the transport, starts the owned receive loop, and completes the
@@ -105,6 +128,8 @@ public sealed class DeviceSession : IAsyncDisposable
             Interlocked.Exchange(ref _receivedFrameCount, 0);
             Interlocked.Exchange(ref _lostSampleCount, 0);
             _lastSampleCounter = null;
+            SetDeviceState(null);
+            ClearRecentResponses();
             long generation = Interlocked.Increment(ref _connectionGeneration);
             SetState(DeviceSessionState.Connecting);
 
@@ -119,7 +144,7 @@ public sealed class DeviceSession : IAsyncDisposable
                 generation,
                 MessageType.GetDeviceInfo,
                 [],
-                _options.CommandTimeout,
+                _options.GetDeviceInfoTimeout,
                 cancellationToken,
                 MessageType.DeviceInfo).ConfigureAwait(false);
 
@@ -127,6 +152,7 @@ public sealed class DeviceSession : IAsyncDisposable
             PublishDiagnostic(
                 $"Handshake completed: {DeviceInfo.DeviceName} FW " +
                 $"{DeviceInfo.FirmwareVersion}.");
+            SetDeviceState(DeviceOperatingState.Idle);
             SetState(DeviceSessionState.Ready);
         }
         catch
@@ -145,6 +171,32 @@ public sealed class DeviceSession : IAsyncDisposable
             }
 
             throw;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Sends PING while the Node is idle or streaming and requires a matching
+    /// ACK carrying the current device state.
+    /// </summary>
+    public async Task PingAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            EnsureState(DeviceSessionState.Ready, DeviceSessionState.Streaming);
+            await SendRequestAsync(
+                ConnectionGeneration,
+                MessageType.Ping,
+                [],
+                _options.CommandTimeout,
+                cancellationToken,
+                MessageType.Ack).ConfigureAwait(false);
         }
         finally
         {
@@ -191,6 +243,11 @@ public sealed class DeviceSession : IAsyncDisposable
             SetState(DeviceSessionState.Streaming);
             PublishDiagnostic($"Streaming started at {intervalUs} us interval.");
         }
+        catch (DeviceCommandException)
+        {
+            SynchronizeSessionStateFromDevice();
+            throw;
+        }
         catch
         {
             SetState(DeviceSessionState.Faulted);
@@ -226,6 +283,11 @@ public sealed class DeviceSession : IAsyncDisposable
 
             SetState(DeviceSessionState.Ready);
             PublishDiagnostic("Streaming stopped.");
+        }
+        catch (DeviceCommandException)
+        {
+            SynchronizeSessionStateFromDevice();
+            throw;
         }
         catch
         {
@@ -347,7 +409,7 @@ public sealed class DeviceSession : IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                int receivedLength = await _transport.ReadAsync(
+                int receivedLength = await ReadWithPartialFrameTimeoutAsync(
                     receiveBuffer,
                     cancellationToken).ConfigureAwait(false);
 
@@ -390,6 +452,35 @@ public sealed class DeviceSession : IAsyncDisposable
         }
     }
 
+    private async Task<int> ReadWithPartialFrameTimeoutAsync(
+        byte[] receiveBuffer,
+        CancellationToken cancellationToken)
+    {
+        Task<int> readTask = _transport.ReadAsync(
+            receiveBuffer,
+            cancellationToken).AsTask();
+
+        if (_decoder.BufferedByteCount == 0)
+        {
+            return await readTask.ConfigureAwait(false);
+        }
+
+        Task timeoutTask = Task.Delay(
+            _options.PartialFrameTimeout,
+            cancellationToken);
+        Task completedTask = await Task.WhenAny(readTask, timeoutTask)
+            .ConfigureAwait(false);
+
+        if (completedTask == timeoutTask)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _decoder.DiscardPartialFrame();
+            PublishDiagnostic("Discarded partial frame after protocol timeout.");
+        }
+
+        return await readTask.ConfigureAwait(false);
+    }
+
     private void HandleFrame(long generation, ProtocolFrame frame)
     {
         if (generation != ConnectionGeneration)
@@ -408,10 +499,19 @@ public sealed class DeviceSession : IAsyncDisposable
             return;
         }
 
-        if (frame.MessageType == MessageType.TelemetrySample)
+        switch (frame.MessageType)
         {
-            HandleTelemetryFrame(frame);
-            return;
+            case MessageType.TelemetrySample:
+                HandleTelemetryFrame(frame);
+                return;
+
+            case MessageType.DeviceStatus:
+                HandleDeviceStatusFrame(frame);
+                return;
+
+            case MessageType.ErrorReport:
+                HandleErrorReportFrame(frame);
+                return;
         }
 
         if (_pendingResponses.TryGetValue(
@@ -419,7 +519,37 @@ public sealed class DeviceSession : IAsyncDisposable
                 out PendingRequest? pendingRequest) &&
             (pendingRequest.Generation == generation))
         {
-            pendingRequest.Completion.TrySetResult(frame);
+            if (frame.MessageType is MessageType.Ack or MessageType.Nack)
+            {
+                try
+                {
+                    CommandResponseStatus responseStatus =
+                        PayloadCodec.DecodeCommandResponse(
+                            frame.MessageType,
+                            frame.Payload.Span);
+                    SetDeviceState(responseStatus.DeviceState);
+                }
+                catch (ProtocolException exception)
+                {
+                    pendingRequest.Completion.TrySetException(exception);
+                    return;
+                }
+            }
+
+            if (pendingRequest.Completion.TrySetResult(frame))
+            {
+                RememberCompletedResponse(frame.Sequence);
+            }
+
+            return;
+        }
+
+        if (MessageTypeValidator.IsDirectResponse(frame.MessageType) &&
+            IsRecentResponse(frame.Sequence))
+        {
+            PublishDiagnostic(
+                $"Ignored duplicate response {frame.MessageType} " +
+                $"seq={frame.Sequence}.");
             return;
         }
 
@@ -427,8 +557,43 @@ public sealed class DeviceSession : IAsyncDisposable
             $"Unmatched RX {frame.MessageType} seq={frame.Sequence}.");
     }
 
+    private void HandleDeviceStatusFrame(ProtocolFrame frame)
+    {
+        try
+        {
+            DeviceStatus status = PayloadCodec.DecodeDeviceStatus(frame.Payload.Span);
+            SetDeviceState(status.State);
+            PublishDeviceStatus(status);
+        }
+        catch (ProtocolException exception)
+        {
+            PublishDiagnostic(exception.Message);
+        }
+    }
+
+    private void HandleErrorReportFrame(ProtocolFrame frame)
+    {
+        try
+        {
+            DeviceErrorReport report =
+                PayloadCodec.DecodeErrorReport(frame.Payload.Span);
+            PublishDeviceErrorReport(report);
+        }
+        catch (ProtocolException exception)
+        {
+            PublishDiagnostic(exception.Message);
+        }
+    }
+
     private void HandleTelemetryFrame(ProtocolFrame frame)
     {
+        if (DeviceState != DeviceOperatingState.Streaming)
+        {
+            PublishDiagnostic(
+                "Ignored TELEMETRY_SAMPLE while the Node is not streaming.");
+            return;
+        }
+
         try
         {
             TelemetrySample sample = PayloadCodec.DecodeTelemetry(
@@ -526,6 +691,7 @@ public sealed class DeviceSession : IAsyncDisposable
         _receiveTask = null;
         DeviceInfo = null;
         _lastSampleCounter = null;
+        SetDeviceState(null);
 
         if (transportFailure is not null)
         {
@@ -546,12 +712,16 @@ public sealed class DeviceSession : IAsyncDisposable
     {
         if (response.MessageType == MessageType.Nack)
         {
-            (MessageType rejectedRequest, ResultCode resultCode) =
-                PayloadCodec.DecodeAck(response.Payload.Span);
+            CommandResponseStatus rejected =
+                PayloadCodec.DecodeCommandResponse(
+                    response.MessageType,
+                    response.Payload.Span);
             throw new DeviceCommandException(
-                rejectedRequest,
-                resultCode,
-                $"Device rejected {rejectedRequest}: {resultCode}.");
+                rejected.RequestType,
+                rejected.ResultCode,
+                rejected.DeviceState,
+                $"Device rejected {rejected.RequestType}: " +
+                $"{rejected.ResultCode} while {rejected.DeviceState}.");
         }
 
         bool isExpectedResponse = false;
@@ -572,14 +742,31 @@ public sealed class DeviceSession : IAsyncDisposable
 
         if (response.MessageType == MessageType.Ack)
         {
-            (MessageType acknowledgedRequest, ResultCode resultCode) =
-                PayloadCodec.DecodeAck(response.Payload.Span);
+            CommandResponseStatus acknowledged =
+                PayloadCodec.DecodeCommandResponse(
+                    response.MessageType,
+                    response.Payload.Span);
 
-            if ((acknowledgedRequest != requestType) ||
-                (resultCode != ResultCode.Ok))
+            if (acknowledged.RequestType != requestType)
             {
                 throw new ProtocolException(
                     $"ACK does not match request {requestType}.");
+            }
+
+            DeviceOperatingState? expectedState = requestType switch
+            {
+                MessageType.SetStreamConfig => DeviceOperatingState.Idle,
+                MessageType.StartStream => DeviceOperatingState.Streaming,
+                MessageType.StopStream => DeviceOperatingState.Idle,
+                _ => null
+            };
+
+            if (expectedState.HasValue &&
+                (acknowledged.DeviceState != expectedState.Value))
+            {
+                throw new ProtocolException(
+                    $"ACK state {acknowledged.DeviceState} does not match " +
+                    $"the expected state {expectedState.Value} for {requestType}.");
             }
         }
     }
@@ -605,6 +792,40 @@ public sealed class DeviceSession : IAsyncDisposable
             {
                 pendingRequest.Completion.TrySetException(exception);
             }
+        }
+    }
+
+    private void RememberCompletedResponse(ushort sequence)
+    {
+        lock (_recentResponseGate)
+        {
+            if (_recentResponseSequences.Add(sequence))
+            {
+                _recentResponseOrder.Enqueue(sequence);
+            }
+
+            while (_recentResponseOrder.Count > RecentResponseCapacity)
+            {
+                ushort expired = _recentResponseOrder.Dequeue();
+                _recentResponseSequences.Remove(expired);
+            }
+        }
+    }
+
+    private bool IsRecentResponse(ushort sequence)
+    {
+        lock (_recentResponseGate)
+        {
+            return _recentResponseSequences.Contains(sequence);
+        }
+    }
+
+    private void ClearRecentResponses()
+    {
+        lock (_recentResponseGate)
+        {
+            _recentResponseOrder.Clear();
+            _recentResponseSequences.Clear();
         }
     }
 
@@ -636,12 +857,42 @@ public sealed class DeviceSession : IAsyncDisposable
         }
     }
 
-    private void EnsureState(DeviceSessionState requiredState)
+    private void EnsureState(params DeviceSessionState[] allowedStates)
     {
-        if (State != requiredState)
+        DeviceSessionState currentState = State;
+        foreach (DeviceSessionState allowedState in allowedStates)
         {
-            throw new InvalidOperationException(
-                $"Operation requires {requiredState}; current state is {State}.");
+            if (currentState == allowedState)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Operation is not allowed while the session is {currentState}.");
+    }
+
+    private void SynchronizeSessionStateFromDevice()
+    {
+        DeviceSessionState sessionState = DeviceState switch
+        {
+            DeviceOperatingState.Idle => DeviceSessionState.Ready,
+            DeviceOperatingState.Streaming => DeviceSessionState.Streaming,
+            _ => DeviceSessionState.Faulted
+        };
+        SetState(sessionState);
+    }
+
+    private void SetDeviceState(DeviceOperatingState? state)
+    {
+        int newValue = state.HasValue ? (int)state.Value : -1;
+        int previousValue = Interlocked.Exchange(
+            ref _deviceStateValue,
+            newValue);
+
+        if (state.HasValue && (previousValue != newValue))
+        {
+            PublishDeviceOperatingStateChanged(state.Value);
         }
     }
 
@@ -655,6 +906,73 @@ public sealed class DeviceSession : IAsyncDisposable
         if (previous != state)
         {
             PublishStateChanged(state);
+        }
+    }
+
+    private void PublishDeviceOperatingStateChanged(DeviceOperatingState state)
+    {
+        Action<DeviceOperatingState>? handlers = DeviceOperatingStateChanged;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<DeviceOperatingState>)subscriber)(state);
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine(exception);
+            }
+        }
+    }
+
+    private void PublishDeviceStatus(DeviceStatus status)
+    {
+        Action<DeviceStatus>? handlers = DeviceStatusReceived;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<DeviceStatus>)subscriber)(status);
+            }
+            catch (Exception exception)
+            {
+                PublishDiagnostic(
+                    $"Device-status subscriber failed: {exception.Message}");
+            }
+        }
+    }
+
+    private void PublishDeviceErrorReport(DeviceErrorReport report)
+    {
+        Action<DeviceErrorReport>? handlers = DeviceErrorReported;
+        if (handlers is null)
+        {
+            PublishDiagnostic(
+                $"Device error 0x{report.ErrorCode:X4}, detail=0x{report.Detail:X8}.");
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<DeviceErrorReport>)subscriber)(report);
+            }
+            catch (Exception exception)
+            {
+                PublishDiagnostic(
+                    $"Device-error subscriber failed: {exception.Message}");
+            }
         }
     }
 

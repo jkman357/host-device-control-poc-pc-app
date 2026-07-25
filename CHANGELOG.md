@@ -1,5 +1,29 @@
 # Changelog
 
+Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
+
+## 0.3.1 — Build portability and analyzer cleanup
+
+- Added the missing `System.Threading.Tasks` import required by `ValueTask` in `MainWindow.DisposeAsync()`.
+- Renamed the public flags enum from `StatusFlags` to `DeviceStatusBits` to satisfy CA1711 while preserving the wire field `status_flags`.
+- Normalized repository text files to LF and added `.gitattributes` to keep Git checkouts consistent across Windows and CI.
+- Added static line-ending validation so CRLF drift is detected before `dotnet format`.
+- Kept the shared System Protocol wire contract and normative vectors unchanged.
+
+## 0.3.0 — System protocol authority alignment
+
+- Rebased implementation work on PC application commit `432d0f5863698bb7d5ed2ad337d02f690f4175b8`.
+- Replaced the locally owned protocol copy with an exact mirror of `host-device-control-poc-system/protocol/protocol.yaml` authority commit `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`.
+- Added protocol provenance locking and exact SHA-256 validation.
+- Updated ACK/NACK to the authoritative three-byte payload: request ID, result code, and Node state.
+- Added idle/streaming Node-state tracking, transition validation, and state-aware command handling.
+- Added DEVICE_STATUS and ERROR_REPORT codecs, events, diagnostics, and UI state summary integration.
+- Added protocol-defined command and partial-frame timeouts, duplicate-response suppression, and unmatched-response diagnostics.
+- Updated the Fake Node to enforce payload lengths, protocol version, command states, state transitions, and authoritative ACK/NACK behavior.
+- Mirrored and validated the system normative PING and ACK vectors.
+- Added tests for ACK vector alignment, Node state, partial-frame discard, DEVICE_STATUS, and ERROR_REPORT.
+- Resolved the previously reported analyzer findings for argument validation, concrete brush return type, and WPF async disposal ownership.
+
 ## 0.2.3 — Cross-platform source-policy validation fix
 
 - Normalized repository-relative paths with `Path.as_posix()` before comparing the approved `async void` boundary allowlist.
@@ -11,8 +35,6 @@
 - Added the missing `System.Threading` import required by `Timeout.InfiniteTimeSpan`.
 - Added explicit `public` modifiers to `IDeviceTransport` members to satisfy the adopted accessibility policy and remove IDE0040 warnings.
 - No wire-protocol or runtime-behavior change.
-
-Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## 0.2.1 — Visual Studio 2026 SDK-resolution fix
 

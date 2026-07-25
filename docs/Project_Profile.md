@@ -5,11 +5,11 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.2.3
-- Implementation base: `84bbc16f02a864084b1270db40b58460ad691e35`
+- Candidate version: 0.3.1
+- Implementation base: `432d0f5863698bb7d5ed2ad337d02f690f4175b8`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
-- Protocol: `protocol/protocol.yaml` v0.1.0
+- Protocol authority: `host-device-control-poc-system/protocol/protocol.yaml` v0.1.0 at `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`; local exact mirror in `protocol/protocol.yaml`
 - Deployment: engineering workstation; not production or clinical software
 - Supported transports: bounded Fake byte stream and Windows SerialPort/VCP
 - Storage model: operator-selected local CSV file plus bounded in-memory UI/log snapshots
@@ -26,12 +26,13 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 - Implicit global usings: disabled
 - Compiler/analyzer profile: .NET analyzers, `latest-recommended`, code style enforced during build
 - Warning policy: warnings are visible in build/CI; warnings-as-errors is temporarily not enabled under `DEV-003`
-- Formatting: repository `.editorconfig`; CI verifies `dotnet format`
+- Formatting: repository `.editorconfig` plus `.gitattributes`; source-controlled text uses LF and CI verifies both the static LF check and `dotnet format`
 - External package: `System.IO.Ports` 8.0.0, fixed direct version
 - Package lock: not yet committed; see `DEV-004`
 - Native dependencies: Windows serial stack, USB CDC/VCP driver, and physical device drivers when Serial mode is used
 - Generated code: none
 - Protocol code: manually derived enums/constants with automated cross-check against `protocol.yaml`
+- C# naming map: authoritative wire field `status_flags` is represented by `DeviceStatusBits`; the wire layout and field name are unchanged
 - Serialization: bounded binary protocol and CSV output; no polymorphic or untrusted object deserialization
 - Test framework: dependency-free executable engineering test harness
 
@@ -61,7 +62,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.2.3 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.3.1 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 
@@ -131,4 +132,4 @@ These records are **pending human approval** for the 0.2.3 candidate. They do no
 
 ## Conformance statement
 
-This repository is an **engineering-rules-aligned candidate**, not a certification or unconditional conformance claim. Acceptance requires a clean controlled Windows build, analyzer review, test execution, manual UI review, protocol cross-end validation, physical MCU validation, and human approval.
+This repository is a **system-protocol-alignment candidate** and an engineering-rules-aligned candidate, not a certification or unconditional conformance claim. Acceptance requires a clean controlled Windows build, analyzer review, test execution, manual UI review, protocol cross-end validation, physical MCU validation, and human approval.

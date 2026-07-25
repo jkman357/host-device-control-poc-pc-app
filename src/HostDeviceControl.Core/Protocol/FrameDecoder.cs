@@ -15,12 +15,25 @@ public sealed class FrameDecoder
 {
     private const int InitialBufferSizeBytes = 4096;
 
+    private readonly bool _allowUnknownMessageTypes;
     private byte[] _buffer = new byte[InitialBufferSizeBytes];
     private int _count;
     private long _crcErrorCount;
     private long _formatErrorCount;
     private long _unknownMessageTypeCount;
     private long _discardedByteCount;
+    private long _partialFrameTimeoutCount;
+
+
+    /// <summary>
+    /// Initializes a decoder. The PC receive path rejects unknown IDs; the fake
+    /// Node parser may preserve a decodable unknown request so it can return the
+    /// Project Protocol INVALID_COMMAND NACK.
+    /// </summary>
+    public FrameDecoder(bool allowUnknownMessageTypes = false)
+    {
+        _allowUnknownMessageTypes = allowUnknownMessageTypes;
+    }
 
     public long CrcErrorCount => Interlocked.Read(ref _crcErrorCount);
 
@@ -31,6 +44,28 @@ public sealed class FrameDecoder
 
     public long DiscardedByteCount =>
         Interlocked.Read(ref _discardedByteCount);
+
+    public long PartialFrameTimeoutCount =>
+        Interlocked.Read(ref _partialFrameTimeoutCount);
+
+    public int BufferedByteCount => _count;
+
+    /// <summary>
+    /// Discards an incomplete candidate after the Project Protocol partial-frame
+    /// timeout expires.
+    /// </summary>
+    public void DiscardPartialFrame()
+    {
+        if (_count == 0)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _partialFrameTimeoutCount);
+        Interlocked.Increment(ref _formatErrorCount);
+        Interlocked.Add(ref _discardedByteCount, _count);
+        _count = 0;
+    }
 
     /// <summary>
     /// Appends transport bytes while preserving the protocol-wide memory bound.
@@ -128,7 +163,8 @@ public sealed class FrameDecoder
             }
 
             byte rawMessageType = _buffer[ProtocolConstants.MessageTypeOffset];
-            if (!MessageTypeValidator.IsDefined(rawMessageType))
+            if (!MessageTypeValidator.IsDefined(rawMessageType) &&
+                !_allowUnknownMessageTypes)
             {
                 Interlocked.Increment(ref _unknownMessageTypeCount);
                 Interlocked.Increment(ref _formatErrorCount);

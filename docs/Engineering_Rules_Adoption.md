@@ -18,12 +18,13 @@ The upstream status remains **Draft for Review**. Project adoption does not appr
 
 ## Authority order
 
-1. Project Protocol: `protocol/protocol.yaml`.
-2. Project-specific approved decisions and profile in this repository.
-3. Coordinator Software Engineering Rules.
-4. Topic-specific Coordinator Guides for concurrency, UI, and testing.
-5. C# Coding Rules for language and implementation details.
-6. Tool defaults and informal conventions.
+1. External Project Protocol: `host-device-control-poc-system/protocol/protocol.yaml` at the commit pinned in `protocol/authority-lock.yaml`.
+2. Protocol provenance lock and exact local mirror used for offline validation.
+3. Project-specific approved decisions and profile in this repository.
+4. Coordinator Software Engineering Rules.
+5. Topic-specific Coordinator Guides for concurrency, UI, and testing.
+6. C# Coding Rules for language and implementation details.
+7. Tool defaults and informal conventions.
 
 A lower authority cannot silently override a higher authority. Conflicts and justified departures must be recorded in `Project_Profile.md` before acceptance.
 

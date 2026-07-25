@@ -104,11 +104,13 @@
                     </TextBlock>
                 </StackPanel>
                 <StackPanel Grid.Column="3">
-                    <TextBlock FontWeight="SemiBold" Text="CRC / Format / Unknown" />
+                    <TextBlock FontWeight="SemiBold" Text="CRC / Format / Partial / Unknown" />
                     <TextBlock>
                         <Run Text="{Binding CrcErrorCount, Mode=OneWay}" />
                         <Run Text=" / " />
                         <Run Text="{Binding FormatErrorCount, Mode=OneWay}" />
+                        <Run Text=" / " />
+                        <Run Text="{Binding PartialFrameTimeoutCount, Mode=OneWay}" />
                         <Run Text=" / " />
                         <Run Text="{Binding UnknownMessageTypeCount, Mode=OneWay}" />
                     </TextBlock>

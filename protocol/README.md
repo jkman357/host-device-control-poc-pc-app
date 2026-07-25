@@ -1,27 +1,21 @@
 <!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
 
-# Shared PC/MCU Protocol Contract
+# Project Protocol Mirror
 
-`protocol.yaml` is the authoritative wire-level contract for both repositories:
+The wire protocol is **not owned by this PC repository**. The project-level authority is:
 
-- `host-device-control-poc-pc-app`
-- `host-device-control-poc-stm32f446re-fw`
+```text
+host-device-control-poc-system/protocol/protocol.yaml
+```
 
-The protocol must not be treated as PC-owned or MCU-owned. A change is complete
-only when the contract, test vectors, PC implementation, MCU implementation, and
-bring-up evidence agree.
+The local `protocol/protocol.yaml` is a byte-for-byte mirror of authority commit
+`e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`, SHA-256
+`7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e`.
+The provenance record is `authority-lock.yaml`.
 
-## Change procedure
+Do not independently edit the local mirror. Change the system repository first,
+classify compatibility and wire-version impact, commit the authority, then update
+this mirror, lock, derived C# implementation, normative vectors, and evidence.
 
-1. Propose the message or field change in `protocol.yaml`.
-2. Confirm direction, state preconditions, response, timeout, and error behavior.
-3. Decide whether the wire version changes.
-4. Update `test-vectors/protocol-v0.1.0-vectors.json` or create a new versioned set.
-5. Update both implementations independently.
-6. Compare the encoded bytes across languages.
-7. Run hardware bring-up and retain evidence.
-
-## Current status
-
-Version `0x01` is a PoC baseline. It is sufficiently defined for parallel PC and
-MCU development, but it is not a production or safety-approved protocol.
+Protocol v0.1.0 / wire version 0x01 remains `candidate_for_alignment`. A successful
+PC build or fake-device run does not promote it to `verified_baseline`.

@@ -156,7 +156,7 @@ public sealed class WaveformControl : FrameworkElement
         return height - (normalized * height);
     }
 
-    private static Brush CreateFrozenBrush(Color color)
+    private static SolidColorBrush CreateFrozenBrush(Color color)
     {
         var brush = new SolidColorBrush(color);
         brush.Freeze();

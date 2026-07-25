@@ -10,14 +10,11 @@ using HostDeviceControl.Core.Models;
 namespace HostDeviceControl.Core.Protocol;
 
 /// <summary>
-/// Encodes and validates protocol payloads owned by
-/// <c>protocol/protocol.yaml</c>.
+/// Encodes and validates payloads derived from the shared Project Protocol.
 /// </summary>
 public static class PayloadCodec
 {
-    private const int AckPayloadLength = 2;
     private const int StreamConfigPayloadLength = 2;
-    private const int TelemetryPayloadLength = ProtocolConstants.TelemetryPayloadSize;
     private const int DeviceInfoFixedLength = 8;
     private const int MaximumDeviceNameLengthBytes = 32;
 
@@ -26,16 +23,19 @@ public static class PayloadCodec
         throwOnInvalidBytes: true);
 
     /// <summary>
-    /// Encodes an ACK or NACK payload.
+    /// Encodes a validated ACK or NACK payload.
     /// </summary>
-    public static byte[] EncodeAck(MessageType requestType, ResultCode resultCode)
+    public static byte[] EncodeCommandResponse(
+        MessageType requestType,
+        ResultCode resultCode,
+        DeviceOperatingState deviceState)
     {
         if (!MessageTypeValidator.IsHostCommand(requestType))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(requestType),
                 requestType,
-                "ACK/NACK request type must identify a host command.");
+                "Response request type must identify a host command.");
         }
 
         if (!ResultCodeValidator.IsDefined((byte)resultCode))
@@ -46,22 +46,63 @@ public static class PayloadCodec
                 "Result code is not defined by the Project Protocol.");
         }
 
-        return [(byte)requestType, (byte)resultCode];
+        if (!DeviceOperatingStateValidator.IsDefined((byte)deviceState))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(deviceState),
+                deviceState,
+                "Device state is not defined by the Project Protocol.");
+        }
+
+        return [(byte)requestType, (byte)resultCode, (byte)deviceState];
+    }
+
+    /// <summary>
+    /// Encodes INVALID_COMMAND or another non-OK NACK for a decodable raw
+    /// request message ID that is not part of the current command enum.
+    /// </summary>
+    public static byte[] EncodeRawNack(
+        byte requestMessageId,
+        ResultCode resultCode,
+        DeviceOperatingState deviceState)
+    {
+        if (!ResultCodeValidator.IsDefined((byte)resultCode) ||
+            (resultCode == ResultCode.Ok))
+        {
+            throw new ArgumentOutOfRangeException(nameof(resultCode));
+        }
+
+        if (!DeviceOperatingStateValidator.IsDefined((byte)deviceState))
+        {
+            throw new ArgumentOutOfRangeException(nameof(deviceState));
+        }
+
+        return [requestMessageId, (byte)resultCode, (byte)deviceState];
     }
 
     /// <summary>
     /// Decodes and validates an ACK or NACK payload.
     /// </summary>
-    public static (MessageType RequestType, ResultCode ResultCode) DecodeAck(
+    public static CommandResponseStatus DecodeCommandResponse(
+        MessageType responseType,
         ReadOnlySpan<byte> payload)
     {
-        if (payload.Length != AckPayloadLength)
+        if (responseType is not MessageType.Ack and not MessageType.Nack)
         {
-            throw new ProtocolException("ACK/NACK payload length must be 2 bytes.");
+            throw new ArgumentOutOfRangeException(
+                nameof(responseType),
+                responseType,
+                "Response type must be ACK or NACK.");
+        }
+
+        if (payload.Length != ProtocolConstants.CommandResponsePayloadSize)
+        {
+            throw new ProtocolException("ACK/NACK payload length must be 3 bytes.");
         }
 
         byte rawRequestType = payload[0];
         byte rawResultCode = payload[1];
+        byte rawDeviceState = payload[2];
 
         if (!MessageTypeValidator.IsDefined(rawRequestType) ||
             !MessageTypeValidator.IsHostCommand((MessageType)rawRequestType))
@@ -74,24 +115,36 @@ public static class PayloadCodec
             throw new ProtocolException("ACK/NACK result code is invalid.");
         }
 
-        return ((MessageType)rawRequestType, (ResultCode)rawResultCode);
+        if (!DeviceOperatingStateValidator.IsDefined(rawDeviceState))
+        {
+            throw new ProtocolException("ACK/NACK device state is invalid.");
+        }
+
+        var resultCode = (ResultCode)rawResultCode;
+        if ((responseType == MessageType.Ack) && (resultCode != ResultCode.Ok))
+        {
+            throw new ProtocolException("ACK result code must be OK.");
+        }
+
+        if ((responseType == MessageType.Nack) && (resultCode == ResultCode.Ok))
+        {
+            throw new ProtocolException("NACK result code must not be OK.");
+        }
+
+        return new CommandResponseStatus(
+            (MessageType)rawRequestType,
+            resultCode,
+            (DeviceOperatingState)rawDeviceState);
     }
 
-    /// <summary>
-    /// Encodes the stream sample interval in microseconds.
-    /// </summary>
     public static byte[] EncodeSetStreamConfig(ushort intervalUs)
     {
         ValidateStreamInterval(intervalUs);
-
         byte[] payload = new byte[StreamConfigPayloadLength];
         BinaryPrimitives.WriteUInt16LittleEndian(payload, intervalUs);
         return payload;
     }
 
-    /// <summary>
-    /// Decodes and validates the stream sample interval in microseconds.
-    /// </summary>
     public static ushort DecodeSetStreamConfig(ReadOnlySpan<byte> payload)
     {
         if (payload.Length != StreamConfigPayloadLength)
@@ -105,9 +158,6 @@ public static class PayloadCodec
         return intervalUs;
     }
 
-    /// <summary>
-    /// Encodes device-identification data using strict UTF-8.
-    /// </summary>
     public static byte[] EncodeDeviceInfo(DeviceInfo deviceInfo)
     {
         ArgumentNullException.ThrowIfNull(deviceInfo);
@@ -136,10 +186,6 @@ public static class PayloadCodec
         return payload;
     }
 
-    /// <summary>
-    /// Decodes device-identification data and rejects malformed UTF-8 or
-    /// inconsistent length fields.
-    /// </summary>
     public static DeviceInfo DecodeDeviceInfo(ReadOnlySpan<byte> payload)
     {
         if (payload.Length < DeviceInfoFixedLength)
@@ -194,9 +240,39 @@ public static class PayloadCodec
             deviceName);
     }
 
-    /// <summary>
-    /// Encodes one finite telemetry sample.
-    /// </summary>
+    public static byte[] EncodeDeviceStatus(DeviceStatus status)
+    {
+        if (!DeviceOperatingStateValidator.IsDefined((byte)status.State))
+        {
+            throw new ArgumentOutOfRangeException(nameof(status));
+        }
+
+        byte[] payload = new byte[ProtocolConstants.DeviceStatusPayloadSize];
+        payload[0] = (byte)status.State;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            payload.AsSpan(1, sizeof(ushort)),
+            (ushort)status.StatusBits);
+        return payload;
+    }
+
+    public static DeviceStatus DecodeDeviceStatus(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != ProtocolConstants.DeviceStatusPayloadSize)
+        {
+            throw new ProtocolException("DEVICE_STATUS payload length must be 3 bytes.");
+        }
+
+        if (!DeviceOperatingStateValidator.IsDefined(payload[0]))
+        {
+            throw new ProtocolException("DEVICE_STATUS state is invalid.");
+        }
+
+        return new DeviceStatus(
+            (DeviceOperatingState)payload[0],
+            (DeviceStatusBits)BinaryPrimitives.ReadUInt16LittleEndian(
+                payload.Slice(1, sizeof(ushort))));
+    }
+
     public static byte[] EncodeTelemetry(TelemetrySample sample)
     {
         if (!float.IsFinite(sample.SineValue))
@@ -207,7 +283,7 @@ public static class PayloadCodec
                 "Telemetry value must be finite.");
         }
 
-        byte[] payload = new byte[TelemetryPayloadLength];
+        byte[] payload = new byte[ProtocolConstants.TelemetryPayloadSize];
         BinaryPrimitives.WriteUInt32LittleEndian(
             payload.AsSpan(0, sizeof(uint)),
             sample.SampleCounter);
@@ -223,15 +299,11 @@ public static class PayloadCodec
         return payload;
     }
 
-    /// <summary>
-    /// Decodes one telemetry sample and associates it with a host UTC receipt
-    /// timestamp supplied by the session owner.
-    /// </summary>
     public static TelemetrySample DecodeTelemetry(
         ReadOnlySpan<byte> payload,
         DateTimeOffset hostReceivedUtc)
     {
-        if (payload.Length != TelemetryPayloadLength)
+        if (payload.Length != ProtocolConstants.TelemetryPayloadSize)
         {
             throw new ProtocolException(
                 "TELEMETRY_SAMPLE payload length must be 14 bytes.");
@@ -258,6 +330,32 @@ public static class PayloadCodec
             sineValue,
             statusFlags,
             hostReceivedUtc);
+    }
+
+    public static byte[] EncodeErrorReport(DeviceErrorReport report)
+    {
+        byte[] payload = new byte[ProtocolConstants.ErrorReportPayloadSize];
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            payload.AsSpan(0, sizeof(ushort)),
+            report.ErrorCode);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            payload.AsSpan(2, sizeof(uint)),
+            report.Detail);
+        return payload;
+    }
+
+    public static DeviceErrorReport DecodeErrorReport(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != ProtocolConstants.ErrorReportPayloadSize)
+        {
+            throw new ProtocolException("ERROR_REPORT payload length must be 6 bytes.");
+        }
+
+        return new DeviceErrorReport(
+            BinaryPrimitives.ReadUInt16LittleEndian(
+                payload.Slice(0, sizeof(ushort))),
+            BinaryPrimitives.ReadUInt32LittleEndian(
+                payload.Slice(2, sizeof(uint))));
     }
 
     private static void ValidateStreamInterval(ushort intervalUs)

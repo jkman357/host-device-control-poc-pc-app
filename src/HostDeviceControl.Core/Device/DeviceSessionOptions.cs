@@ -9,44 +9,35 @@ namespace HostDeviceControl.Core.Device;
 
 /// <summary>
 /// Defines bounded timeout and buffer policies for one device session.
+/// Defaults are derived from the shared Project Protocol.
 /// </summary>
 public sealed class DeviceSessionOptions
 {
-    /// <summary>
-    /// Gets the default immutable option set used by production composition.
-    /// </summary>
     public static DeviceSessionOptions Default { get; } = new();
 
-    /// <summary>
-    /// Gets or initializes the timeout for normal command responses.
-    /// </summary>
-    public TimeSpan CommandTimeout { get; init; } = TimeSpan.FromSeconds(1);
+    public TimeSpan GetDeviceInfoTimeout { get; init; } =
+        TimeSpan.FromMilliseconds(ProtocolConstants.GetDeviceInfoTimeoutMs);
 
-    /// <summary>
-    /// Gets or initializes the timeout for the stop-stream command.
-    /// </summary>
-    public TimeSpan StopStreamTimeout { get; init; } = TimeSpan.FromMilliseconds(1500);
+    public TimeSpan CommandTimeout { get; init; } =
+        TimeSpan.FromMilliseconds(ProtocolConstants.CommandDefaultTimeoutMs);
 
-    /// <summary>
-    /// Gets or initializes the maximum time allowed for receive-loop shutdown.
-    /// </summary>
-    public TimeSpan ReceiveLoopShutdownTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan StopStreamTimeout { get; init; } =
+        TimeSpan.FromMilliseconds(ProtocolConstants.StopStreamTimeoutMs);
 
-    /// <summary>
-    /// Gets or initializes the transport receive-buffer size in bytes.
-    /// </summary>
+    public TimeSpan PartialFrameTimeout { get; init; } =
+        TimeSpan.FromMilliseconds(ProtocolConstants.PartialFrameTimeoutMs);
+
+    public TimeSpan ReceiveLoopShutdownTimeout { get; init; } =
+        TimeSpan.FromSeconds(2);
+
     public int ReceiveBufferSizeBytes { get; init; } = 1024;
 
-    /// <summary>
-    /// Validates all configured bounds.
-    /// </summary>
-    /// <exception cref="ArgumentOutOfRangeException">
-    /// Thrown when a timeout or buffer size is outside the supported range.
-    /// </exception>
     public void Validate()
     {
+        ValidatePositiveTimeout(GetDeviceInfoTimeout, nameof(GetDeviceInfoTimeout));
         ValidatePositiveTimeout(CommandTimeout, nameof(CommandTimeout));
         ValidatePositiveTimeout(StopStreamTimeout, nameof(StopStreamTimeout));
+        ValidatePositiveTimeout(PartialFrameTimeout, nameof(PartialFrameTimeout));
         ValidatePositiveTimeout(
             ReceiveLoopShutdownTimeout,
             nameof(ReceiveLoopShutdownTimeout));

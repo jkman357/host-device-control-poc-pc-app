@@ -14,14 +14,18 @@ public sealed class DeviceCommandException : Exception
     public DeviceCommandException(
         MessageType requestType,
         ResultCode resultCode,
+        DeviceOperatingState deviceState,
         string message)
         : base(message)
     {
         RequestType = requestType;
         ResultCode = resultCode;
+        DeviceState = deviceState;
     }
 
     public MessageType RequestType { get; }
 
     public ResultCode ResultCode { get; }
+
+    public DeviceOperatingState DeviceState { get; }
 }

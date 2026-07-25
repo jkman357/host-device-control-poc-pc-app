@@ -1,0 +1,7 @@
+# Copyright © 2026 Ray Yang. All rights reserved.
+# No license is granted. See LICENSE and NOTICE.md.
+
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
