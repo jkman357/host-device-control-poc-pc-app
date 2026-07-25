@@ -16,7 +16,7 @@ The application demonstrates a complete vertical slice:
 
 ## Status
 
-`v0.1.0 PoC baseline`
+`v0.1.2 PoC baseline`
 
 The repository is intentionally usable before the MCU implementation is complete. The authoritative communication contract is:
 
@@ -29,7 +29,7 @@ PC and MCU implementations shall conform to the same protocol version and test v
 ## Prerequisites
 
 - Windows 10 or Windows 11
-- Visual Studio 2022 17.8 or later, or .NET 8 SDK
+- Visual Studio 2022 17.11 or later (including newer Visual Studio releases), or .NET 8 SDK
 - `.NET desktop development` workload when using Visual Studio
 
 ## Build
@@ -38,6 +38,27 @@ PC and MCU implementations shall conform to the same protocol version and test v
 dotnet restore HostDeviceControl.Poc.sln
 dotnet build HostDeviceControl.Poc.sln -c Release
 ```
+
+
+## Run from Visual Studio
+
+The executable project is:
+
+```text
+HostDeviceControl.App
+```
+
+After opening `HostDeviceControl.Poc.sln`, confirm that `HostDeviceControl.App` is selected as the startup project. If Visual Studio selects a class-library project instead:
+
+1. In Solution Explorer, right-click `HostDeviceControl.App`.
+2. Select `Set as Startup Project`.
+3. Press `F5` or `Ctrl+F5`.
+
+The repository also includes `HostDeviceControl.Poc.slnLaunch` for Visual Studio versions that support shared solution launch profiles.
+
+### WPF binding startup error
+
+Display-only ViewModel properties use explicit `Mode=OneWay` bindings. This avoids WPF attempting to write back to properties whose setters are intentionally private, especially when values are displayed through `Run.Text`.
 
 ## Run without hardware
 

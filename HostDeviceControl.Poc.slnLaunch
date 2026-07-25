@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "HostDeviceControl.App",
+    "Projects": [
+      {
+        "Path": "src\\HostDeviceControl.App\\HostDeviceControl.App.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]

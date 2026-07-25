@@ -25,23 +25,23 @@
                 CornerRadius="4">
             <WrapPanel VerticalAlignment="Center">
                 <TextBlock Margin="4" Text="Transport" />
-                <ComboBox ItemsSource="{Binding ConnectionModes}"
+                <ComboBox ItemsSource="{Binding ConnectionModes, Mode=OneWay}"
                           SelectedItem="{Binding SelectedConnectionMode}" />
 
                 <TextBlock Margin="12,4,4,4" Text="COM Port" />
-                <ComboBox ItemsSource="{Binding PortNames}"
+                <ComboBox ItemsSource="{Binding PortNames, Mode=OneWay}"
                           SelectedItem="{Binding SelectedPortName}"
-                          IsEnabled="{Binding IsSerialMode}" />
+                          IsEnabled="{Binding IsSerialMode, Mode=OneWay}" />
                 <Button Command="{Binding RefreshPortsCommand}"
                         Content="Refresh Ports"
-                        IsEnabled="{Binding IsSerialMode}" />
+                        IsEnabled="{Binding IsSerialMode, Mode=OneWay}" />
 
                 <TextBlock Margin="12,4,4,4" Text="Baud" />
                 <TextBox Width="90"
                          Margin="4"
                          Padding="6"
                          Text="{Binding BaudRate}"
-                         IsEnabled="{Binding IsSerialMode}" />
+                         IsEnabled="{Binding IsSerialMode, Mode=OneWay}" />
 
                 <Button Command="{Binding ConnectCommand}" Content="Connect" />
                 <Button Command="{Binding DisconnectCommand}" Content="Disconnect" />
@@ -62,26 +62,26 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
                     <TextBlock FontWeight="SemiBold" Text="Device" />
-                    <TextBlock Text="{Binding DeviceSummary}" />
+                    <TextBlock Text="{Binding DeviceSummary, Mode=OneWay}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1">
                     <TextBlock FontWeight="SemiBold" Text="Session" />
-                    <TextBlock Text="{Binding SessionState}" />
+                    <TextBlock Text="{Binding SessionState, Mode=OneWay}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
                     <TextBlock FontWeight="SemiBold" Text="Frames / Samples" />
                     <TextBlock>
-                        <Run Text="{Binding ReceivedFrameCount}" />
+                        <Run Text="{Binding ReceivedFrameCount, Mode=OneWay}" />
                         <Run Text=" / " />
-                        <Run Text="{Binding ReceivedSampleCount}" />
+                        <Run Text="{Binding ReceivedSampleCount, Mode=OneWay}" />
                     </TextBlock>
                 </StackPanel>
                 <StackPanel Grid.Column="3">
                     <TextBlock FontWeight="SemiBold" Text="CRC / Lost" />
                     <TextBlock>
-                        <Run Text="{Binding CrcErrorCount}" />
+                        <Run Text="{Binding CrcErrorCount, Mode=OneWay}" />
                         <Run Text=" / " />
-                        <Run Text="{Binding LostSampleCount}" />
+                        <Run Text="{Binding LostSampleCount, Mode=OneWay}" />
                     </TextBlock>
                 </StackPanel>
             </Grid>
@@ -104,7 +104,7 @@
                            Text="Telemetry waveform — latest 10 seconds at 200 Hz" />
                 <controls:WaveformControl Grid.Row="1"
                                           Margin="4"
-                                          Samples="{Binding ChartSamples}"
+                                          Samples="{Binding ChartSamples, Mode=OneWay}"
                                           MinimumValue="-1.2"
                                           MaximumValue="1.2" />
             </Grid>
@@ -120,11 +120,11 @@
             <TextBlock Margin="12,4,4,4" Text="Recording:" />
             <TextBlock Margin="4"
                        FontWeight="SemiBold"
-                       Text="{Binding RecordingStatus}" />
+                       Text="{Binding RecordingStatus, Mode=OneWay}" />
         </WrapPanel>
 
         <GroupBox Grid.Row="4" Header="Operational log">
-            <ListBox ItemsSource="{Binding LogEntries}"
+            <ListBox ItemsSource="{Binding LogEntries, Mode=OneWay}"
                      FontFamily="Consolas"
                      FontSize="12"
                      ScrollViewer.HorizontalScrollBarVisibility="Auto" />
@@ -132,13 +132,13 @@
 
         <StatusBar Grid.Row="5" Margin="0,8,0,0">
             <StatusBarItem>
-                <TextBlock Text="{Binding StatusMessage}" />
+                <TextBlock Text="{Binding StatusMessage, Mode=OneWay}" />
             </StatusBarItem>
             <Separator />
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="Device tick: " />
-                    <Run Text="{Binding LatestDeviceTickUs}" />
+                    <Run Text="{Binding LatestDeviceTickUs, Mode=OneWay}" />
                     <Run Text=" us" />
                 </TextBlock>
             </StatusBarItem>
@@ -146,7 +146,7 @@
             <StatusBarItem>
                 <TextBlock>
                     <Run Text="Recorder drops: " />
-                    <Run Text="{Binding RecorderDropCount}" />
+                    <Run Text="{Binding RecorderDropCount, Mode=OneWay}" />
                 </TextBlock>
             </StatusBarItem>
         </StatusBar>
