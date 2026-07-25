@@ -1,0 +1,34 @@
+registry_version: 1
+project: host-device-control-poc-pc-app
+status: poc_baseline
+
+sources_of_truth:
+  - path: protocol/protocol.yaml
+    authority: communication_contract
+    applies_to:
+      - pc_application
+      - stm32f446re_firmware
+
+  - path: docs/Architecture.md
+    authority: pc_application_architecture
+    applies_to:
+      - pc_application
+
+  - path: docs/Protocol_Decisions.md
+    authority: protocol_decision_rationale
+    applies_to:
+      - pc_application
+      - stm32f446re_firmware
+
+precedence:
+  - protocol/protocol.yaml
+  - docs/Architecture.md
+  - docs/Protocol_Decisions.md
+  - README.md
+
+human_approval_required_for:
+  - protocol_version_change
+  - message_id_change
+  - payload_layout_change
+  - crc_parameter_change
+  - safety_or_product_reuse

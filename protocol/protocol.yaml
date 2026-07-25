@@ -1,0 +1,207 @@
+protocol:
+  name: host-device-control-poc
+  version: 0.1.0
+  wire_version: 0x01
+  status: poc_baseline
+  authority: protocol/protocol.yaml
+  byte_order: little_endian
+  text_encoding: utf_8
+
+transport_profile:
+  physical_path: st_link_virtual_com_port
+  baud_rate_bps: 115200
+  data_bits: 8
+  parity: none
+  stop_bits: 1
+  flow_control: none
+
+framing:
+  sof:
+    bytes: [0xA5, 0x5A]
+    included_in_crc: false
+  fields:
+    - name: version
+      type: uint8
+      size_bytes: 1
+    - name: message_id
+      type: uint8
+      size_bytes: 1
+    - name: sequence
+      type: uint16
+      size_bytes: 2
+    - name: payload_length
+      type: uint16
+      size_bytes: 2
+    - name: payload
+      type: byte_array
+      size_bytes: payload_length
+    - name: crc16
+      type: uint16
+      size_bytes: 2
+  minimum_frame_size_bytes: 10
+  maximum_payload_size_bytes: 1024
+  crc:
+    algorithm: crc_16_ccitt_false
+    polynomial: 0x1021
+    initial_value: 0xFFFF
+    reflect_input: false
+    reflect_output: false
+    xor_output: 0x0000
+    covered_bytes: version_through_end_of_payload
+    check_vector:
+      input_ascii: "123456789"
+      expected: 0x29B1
+
+sequence_rules:
+  host_command:
+    zero_allowed: false
+    allocation: monotonically_incrementing_with_wrap
+  direct_response:
+    copies_request_sequence: true
+  unsolicited_device_message:
+    uses_device_frame_sequence: true
+  telemetry_loss_detection:
+    field: payload.sample_counter
+    wraparound: uint32
+
+messages:
+  - name: PING
+    id: 0x01
+    direction: pc_to_mcu
+    kind: command
+    payload: []
+    valid_responses: [ACK, NACK]
+
+  - name: GET_DEVICE_INFO
+    id: 0x02
+    direction: pc_to_mcu
+    kind: command
+    payload: []
+    valid_responses: [DEVICE_INFO, NACK]
+
+  - name: SET_STREAM_CONFIG
+    id: 0x03
+    direction: pc_to_mcu
+    kind: command
+    payload:
+      - name: interval_us
+        type: uint16
+        unit: microsecond
+        valid_range: [1000, 60000]
+        poc_default: 5000
+    valid_responses: [ACK, NACK]
+
+  - name: START_STREAM
+    id: 0x04
+    direction: pc_to_mcu
+    kind: command
+    payload: []
+    valid_responses: [ACK, NACK]
+
+  - name: STOP_STREAM
+    id: 0x05
+    direction: pc_to_mcu
+    kind: command
+    payload: []
+    valid_responses: [ACK, NACK]
+
+  - name: ACK
+    id: 0x80
+    direction: mcu_to_pc
+    kind: response
+    payload:
+      - name: request_message_id
+        type: uint8
+      - name: result_code
+        type: uint8
+        required_value: 0x00
+
+  - name: NACK
+    id: 0x81
+    direction: mcu_to_pc
+    kind: response
+    payload:
+      - name: request_message_id
+        type: uint8
+      - name: result_code
+        type: uint8
+
+  - name: DEVICE_INFO
+    id: 0x82
+    direction: mcu_to_pc
+    kind: response
+    payload:
+      - name: device_type
+        type: uint16
+        poc_value: 0x4460
+      - name: firmware_major
+        type: uint8
+      - name: firmware_minor
+        type: uint8
+      - name: firmware_patch
+        type: uint8
+      - name: maximum_stream_rate_hz
+        type: uint16
+      - name: device_name_length
+        type: uint8
+      - name: device_name
+        type: utf8_byte_array
+        size_bytes: device_name_length
+        maximum_size_bytes: 32
+
+  - name: DEVICE_STATUS
+    id: 0x83
+    direction: mcu_to_pc
+    kind: response_or_event
+    payload:
+      - name: state
+        type: uint8
+      - name: status_flags
+        type: uint16
+
+  - name: TELEMETRY_SAMPLE
+    id: 0x90
+    direction: mcu_to_pc
+    kind: event
+    payload:
+      - name: sample_counter
+        type: uint32
+      - name: device_tick_us
+        type: uint32
+      - name: sine_value
+        type: float32_ieee754
+      - name: status_flags
+        type: uint16
+    payload_size_bytes: 14
+
+  - name: ERROR_REPORT
+    id: 0x91
+    direction: mcu_to_pc
+    kind: event
+    payload:
+      - name: error_code
+        type: uint16
+      - name: detail
+        type: uint32
+
+result_codes:
+  - { name: OK, value: 0x00 }
+  - { name: INVALID_COMMAND, value: 0x01 }
+  - { name: INVALID_LENGTH, value: 0x02 }
+  - { name: INVALID_VALUE, value: 0x03 }
+  - { name: INVALID_STATE, value: 0x04 }
+  - { name: UNSUPPORTED_VERSION, value: 0x05 }
+  - { name: INTERNAL_ERROR, value: 0x06 }
+
+host_timeouts_ms:
+  get_device_info: 1000
+  command_default: 1000
+  stop_stream: 1500
+
+error_behavior:
+  invalid_crc: discard_frame_and_resynchronize
+  invalid_payload_length: discard_candidate_and_resynchronize
+  unsupported_version: reject_message
+  unknown_message_id: send_nack_when_request_is_decodable
+  command_in_invalid_state: send_nack_invalid_state
+  host_timeout: fail_command_without_assuming_device_state_change

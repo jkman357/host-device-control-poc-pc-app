@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HostDeviceControl.Core</AssemblyName>
+    <RootNamespace>HostDeviceControl.Core</RootNamespace>
+  </PropertyGroup>
+</Project>

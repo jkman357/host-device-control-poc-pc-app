@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>HostDeviceControl.Protocol.Tests</AssemblyName>
+    <RootNamespace>HostDeviceControl.Protocol.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HostDeviceControl.Core\HostDeviceControl.Core.csproj" />
+    <ProjectReference Include="..\..\src\HostDeviceControl.Transport.Fake\HostDeviceControl.Transport.Fake.csproj" />
+  </ItemGroup>
+</Project>

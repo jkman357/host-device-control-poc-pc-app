@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>HostDeviceControl.Transport.Fake</AssemblyName>
+    <RootNamespace>HostDeviceControl.Transport.Fake</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\HostDeviceControl.Core\HostDeviceControl.Core.csproj" />
+  </ItemGroup>
+</Project>

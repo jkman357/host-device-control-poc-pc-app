@@ -1,0 +1,16 @@
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+[Bb]in/
+[Oo]bj/
+[Aa]rtifacts/
+TestResults/
+*.nupkg
+*.snupkg
+*.log
+*.csv
+*.tmp
+.DS_Store
