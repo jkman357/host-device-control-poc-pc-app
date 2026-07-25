@@ -64,12 +64,12 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.2.0");
+        Console.WriteLine("Software candidate: 0.2.2");
         Console.WriteLine("Repository base: 84bbc16f02a864084b1270db40b58460ad691e35");
         Console.WriteLine("Protocol: protocol.yaml v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.2.0");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.2.2");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");

@@ -1,6 +1,19 @@
 # Changelog
 
+## 0.2.2 — Core compilation and explicit interface-accessibility fix
+
+- Added the missing `System.Threading` import required by `Timeout.InfiniteTimeSpan`.
+- Added explicit `public` modifiers to `IDeviceTransport` members to satisfy the adopted accessibility policy and remove IDE0040 warnings.
+- No wire-protocol or runtime-behavior change.
+
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
+
+## 0.2.1 — Visual Studio 2026 SDK-resolution fix
+
+- Removed the exact `.NET SDK 8.0.100` feature-band requirement that could trigger `NETSDK1141` on Visual Studio 2026 systems.
+- Changed `global.json` to select the latest installed stable SDK while retaining the `net8.0-windows` target framework.
+- Kept GitHub Actions on the controlled `8.0.x` SDK baseline.
+- Documented local/CI SDK selection, verification commands, and the associated controlled deviation.
 
 ## 0.2.0 — Engineering-rules-aligned candidate
 

@@ -6,7 +6,7 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.2.0 engineering-rules-aligned candidate** based on repository commit `84bbc16f02a864084b1270db40b58460ad691e35`.
+**v0.2.2 engineering-rules-aligned candidate** based on repository commit `84bbc16f02a864084b1270db40b58460ad691e35`.
 
 This revision explicitly adopts five engineering documents from `host-device-control-framework` commit `7a68980ef5faa2e897a3574af121683d65f74638`:
 
@@ -43,9 +43,11 @@ The PC and MCU implementations must use the same protocol version and test vecto
 ## Prerequisites
 
 - Windows 10 or Windows 11
-- .NET 8 SDK
+- .NET 8 or a later stable .NET SDK capable of targeting `net8.0-windows`
 - Visual Studio with the `.NET desktop development` workload when using the IDE
 - Python 3 for repository validators
+
+The application targets .NET 8. Local SDK selection intentionally uses the latest stable SDK installed on the workstation so Visual Studio 2026 systems are not blocked when the exact .NET 8 SDK feature band is absent. GitHub Actions still installs and builds with `8.0.x` as the controlled CI baseline.
 
 ## Validate, build, and test
 
@@ -66,6 +68,17 @@ After that baseline is reviewed, CI should be changed to locked restore.
 ## Run from Visual Studio
 
 The executable project is `HostDeviceControl.App`. Set it as the startup project, then press `F5` or `Ctrl+F5`. A shared `HostDeviceControl.Poc.slnLaunch` profile is included for Visual Studio versions that support it.
+
+### SDK resolution troubleshooting
+
+Check the SDKs visible to Visual Studio and the command line:
+
+```powershell
+dotnet --list-sdks
+dotnet --info
+```
+
+`global.json` does not pin an unavailable feature band. It selects the latest installed stable SDK and keeps the target framework at `net8.0-windows`. If no SDK is listed, install the `.NET desktop development` workload through Visual Studio Installer.
 
 ## Run without hardware
 

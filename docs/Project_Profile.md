@@ -5,7 +5,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.2.0
+- Candidate version: 0.2.2
 - Implementation base: `84bbc16f02a864084b1270db40b58460ad691e35`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
@@ -19,7 +19,9 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 - Runtime target: .NET 8
 - Language: C# 12
 - UI: WPF on Windows
-- IDE: Visual Studio with the .NET 8 and WPF workloads; command-line SDK is also supported
+- IDE: Visual Studio with the .NET desktop/WPF workload; command-line SDK is also supported
+- Local SDK selection: latest installed stable SDK through `global.json` `rollForward=latestMajor`; the target framework remains .NET 8
+- Controlled CI SDK: `8.0.x` through `actions/setup-dotnet`
 - Nullable reference types: enabled
 - Implicit global usings: disabled
 - Compiler/analyzer profile: .NET analyzers, `latest-recommended`, code style enforced during build
@@ -59,7 +61,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.2.0 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.2.2 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 
@@ -104,6 +106,17 @@ These records are **pending human approval** for the 0.2.0 candidate. They do no
 - Verification: locked restore and package inventory in CI.
 - Approver: pending Ray Yang review.
 - Review condition: must close before release-baseline designation.
+
+### DEV-006 — Local SDK roll-forward
+
+- Rule/section: C# Coding Rules — controlled compiler/SDK profile and reproducible build evidence.
+- Reason: Visual Studio 2026 developer installations may include a later stable SDK without the exact .NET 8 SDK feature band previously pinned by `global.json`.
+- Scope: local workstation SDK selection only; the project target remains `net8.0-windows`.
+- Risk: analyzer or compiler diagnostics may differ between a local later SDK and the controlled CI SDK.
+- Compensating control: GitHub Actions explicitly installs `8.0.x`; controlled evidence records `dotnet --info`; release acceptance uses the pinned CI baseline or another explicitly approved SDK.
+- Verification: local build on Visual Studio 2026 plus clean controlled CI build.
+- Approver: pending Ray Yang review.
+- Review condition: revise when the Project formally migrates its target framework or standardizes all developer SDK installations.
 
 ### DEV-005 — UI automation coverage
 

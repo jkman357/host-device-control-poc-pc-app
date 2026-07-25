@@ -16,25 +16,25 @@ public interface IDeviceTransport : IAsyncDisposable
     /// <summary>
     /// Gets whether the underlying byte channel is currently open.
     /// </summary>
-    bool IsConnected { get; }
+    public bool IsConnected { get; }
 
     /// <summary>
     /// Opens the byte channel. Cancellation semantics are adapter-specific and
     /// shall be documented by the concrete transport.
     /// </summary>
-    Task ConnectAsync(CancellationToken cancellationToken);
+    public Task ConnectAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Closes the byte channel after the owning session has cancelled receive
     /// work.
     /// </summary>
-    Task DisconnectAsync(CancellationToken cancellationToken);
+    public Task DisconnectAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Reads zero or more ordered bytes. A return value of zero does not imply a
     /// complete protocol frame.
     /// </summary>
-    ValueTask<int> ReadAsync(
+    public ValueTask<int> ReadAsync(
         Memory<byte> buffer,
         CancellationToken cancellationToken);
 
@@ -42,7 +42,7 @@ public interface IDeviceTransport : IAsyncDisposable
     /// Writes all supplied bytes to the transport. Completion is not a protocol
     /// acknowledgement.
     /// </summary>
-    ValueTask WriteAsync(
+    public ValueTask WriteAsync(
         ReadOnlyMemory<byte> data,
         CancellationToken cancellationToken);
 }

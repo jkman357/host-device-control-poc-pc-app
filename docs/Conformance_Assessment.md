@@ -4,7 +4,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## Candidate assessment
 
-The 0.2.0 candidate intentionally addresses the five adopted engineering documents through explicit authority adoption, Project profile, bounded queues, owned background tasks, generation-aware correlation, cancellation and timeout handling, WPF thread marshalling, command-state binding, visible overload/error counters, fault-injection tests, and repository validation.
+The 0.2.2 candidate intentionally addresses the five adopted engineering documents through explicit authority adoption, Project profile, bounded queues, owned background tasks, generation-aware correlation, cancellation and timeout handling, WPF thread marshalling, command-state binding, visible overload/error counters, fault-injection tests, and repository validation.
 
 ## Remaining acceptance gates
 

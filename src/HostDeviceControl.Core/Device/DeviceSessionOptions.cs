@@ -2,6 +2,7 @@
 // No license is granted. See LICENSE and NOTICE.md.
 
 using System;
+using System.Threading;
 using HostDeviceControl.Core.Protocol;
 
 namespace HostDeviceControl.Core.Device;
