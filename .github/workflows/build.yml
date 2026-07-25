@@ -1,3 +1,6 @@
+# Copyright © 2026 Ray Yang. All rights reserved.
+# No license is granted. See LICENSE and NOTICE.md.
+
 name: build
 
 on:
@@ -16,16 +19,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
+      - name: Static project validation
+        run: python tools/validate_project.py
+
       - name: Restore
         run: dotnet restore HostDeviceControl.Poc.sln
+
+      - name: Formatting verification
+        run: dotnet format HostDeviceControl.Poc.sln --verify-no-changes --no-restore
 
       - name: Build
         run: dotnet build HostDeviceControl.Poc.sln --configuration Release --no-restore
 
-      - name: Protocol self-test
+      - name: Engineering protocol tests
         run: dotnet run --project tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj --configuration Release --no-build

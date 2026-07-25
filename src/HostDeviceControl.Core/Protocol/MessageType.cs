@@ -1,5 +1,12 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 namespace HostDeviceControl.Core.Protocol;
 
+/// <summary>
+/// Message identifiers derived from <c>protocol/protocol.yaml</c> v0.1.0.
+/// The CI protocol-contract validator prevents independent renumbering.
+/// </summary>
 public enum MessageType : byte
 {
     Ping = 0x01,

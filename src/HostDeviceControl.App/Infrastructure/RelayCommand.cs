@@ -1,8 +1,14 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
 using System.Windows.Input;
 
 namespace HostDeviceControl.App.Infrastructure;
 
+/// <summary>
+/// Implements a synchronous presentation command with explicit enablement.
+/// </summary>
 public sealed class RelayCommand : ICommand
 {
     private readonly Action _execute;

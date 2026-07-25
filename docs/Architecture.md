@@ -1,95 +1,56 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
+
 # PC Application Architecture
 
-## 1. Purpose
+## Purpose
 
-This document defines the PC application responsibility boundaries for the
-NUCLEO-F446RE host-device-control proof of concept.
+This document defines the responsibility and dependency boundaries for the single-Node Windows Coordinator PoC.
 
-## 2. Runtime data flow
-
-```text
-SerialDeviceTransport or FakeDeviceTransport
-    -> DeviceSession receive loop
-    -> FrameDecoder
-    -> command response correlation or telemetry decode
-    -> telemetry queue
-    -> 50 ms UI batching and optional CSV recorder
-    -> WPF waveform and counters
-```
-
-## 3. Project responsibilities
-
-### HostDeviceControl.App
-
-Owns WPF views, view models, UI commands, waveform presentation, port selection,
-and CSV-recording interaction. It must not implement protocol framing, CRC, or
-serial receive parsing.
-
-### HostDeviceControl.Core
-
-Owns transport abstractions, protocol framing, payload codecs, command/response
-correlation, timeout handling, device-session state, telemetry models, and
-protocol statistics. It has no WPF or serial-port dependency.
-
-### HostDeviceControl.Transport.Serial
-
-Owns COM-port discovery and byte-stream I/O. It must not interpret message IDs,
-payloads, ACK/NACK semantics, or telemetry.
-
-### HostDeviceControl.Transport.Fake
-
-Implements the same byte-stream interface as serial transport and simulates the
-MCU protocol. It supports PC development, demos, and regression testing before
-hardware or firmware is available.
-
-## 4. Concurrency model
-
-- exactly one receive loop reads a transport;
-- the frame decoder is owned by that receive loop;
-- pending commands are correlated by sequence number;
-- continuations run asynchronously to avoid receive-loop reentrancy;
-- telemetry callbacks never update WPF collections directly;
-- the view model enqueues telemetry from the receive thread;
-- a WPF dispatcher timer drains the queue every 50 ms;
-- CSV recording uses a separate bounded channel and writer task;
-- UI or file I/O must never block the receive loop.
-
-## 5. Device-session states
+## Dependency direction
 
 ```text
-Disconnected
-  -> Connecting
-  -> Handshaking
-  -> Ready
-  -> StartingStream
-  -> Streaming
-  -> StoppingStream
-  -> Ready
-  -> Disconnecting
-  -> Disconnected
+HostDeviceControl.App
+  -> HostDeviceControl.Core
+  -> HostDeviceControl.Transport.Fake
+  -> HostDeviceControl.Transport.Serial
+
+Transport.Fake / Transport.Serial
+  -> HostDeviceControl.Core abstractions and protocol models
+
+HostDeviceControl.Core
+  -> no WPF and no SerialPort dependency
 ```
 
-Any unrecoverable transport or protocol failure may move the session to
-`Faulted`. The current PoC requires an explicit disconnect and reconnect after a
-fault.
+## Runtime flow
 
-## 6. Buffer policy
+```text
+bounded transport bytes
+  -> generation-owned DeviceSession receive loop
+  -> bounded FrameDecoder and external-value validation
+  -> correlated command response OR validated telemetry
+  -> bounded UI buffer + bounded recorder queue
+  -> 50 ms WPF batch + asynchronous CSV writer
+```
 
-### UI path
+`DeviceSession` is the authority for connection lifecycle, device information, command correlation, and stream state. The ViewModel displays that state and cannot directly write protocol bytes. A transport cannot interpret ACK/NACK, device state, or telemetry meaning.
 
-The live chart retains only the newest configured sample window. Older chart
-points may be discarded because display freshness is more important than UI
-history completeness.
+## Connection generation
 
-### Recording path
+Every successful connection attempt obtains a monotonically increasing generation. Pending requests and received frames are associated with that generation. Disconnect retires the generation, cancels pending requests, closes the transport, and awaits the receive loop within the configured bound. A response from a prior generation cannot satisfy a new request.
 
-The recorder uses a bounded queue. A queue overrun is counted and reported; it
-is never silently treated as complete data. The receive loop remains
-non-blocking even if the storage device is slow.
+## Bounded work
 
-## 7. Extension points
+The specific capacities, overflow policies, and shutdown ownership are recorded in `Concurrency_Model.md`. Continuous acquisition never depends on WPF rendering or file I/O. UI overload discards oldest display samples and exposes the count; recorder overload exposes incomplete evidence rather than silently claiming success.
 
-The design can add TCP, native USB, replay-file, or automated-test transports
-without changing `DeviceSession`. Multi-device support should be introduced by
-creating multiple independent session objects, not by adding device routing to
-the existing single-session view model.
+## Failure boundaries
+
+- malformed external data is rejected before business use;
+- expected cancellation is classified separately from failure;
+- receive-loop failures fault the owning session;
+- UI event boundaries observe exceptions;
+- subscriber failures are isolated from protocol acquisition;
+- incomplete shutdown is reported rather than hidden.
+
+## Extension boundary
+
+Additional transport implementations can be introduced behind `IDeviceTransport`. Multi-Node support must use independent Node/session contexts and a bounded registry; it must not overload the current single-session ViewModel with implicit routing.

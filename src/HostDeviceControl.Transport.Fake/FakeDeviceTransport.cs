@@ -1,4 +1,8 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
@@ -8,19 +12,20 @@ using HostDeviceControl.Core.Protocol;
 
 namespace HostDeviceControl.Transport.Fake;
 
+/// <summary>
+/// Implements a bounded byte-stream simulator for the documented PoC protocol.
+/// It is an engineering dependency and is not evidence of physical hardware
+/// timing, electrical behavior, or safety behavior.
+/// </summary>
 public sealed class FakeDeviceTransport : IDeviceTransport
 {
     private const ushort DeviceType = 0x4460;
     private const ushort MaximumStreamRateHz = 1000;
     private const double SineFrequencyHz = 1.0;
+    private const int ReceiveByteCapacity = ProtocolConstants.MaximumBufferedBytes;
 
-    private readonly Channel<byte> _receiveBytes = Channel.CreateBounded<byte>(
-        new BoundedChannelOptions(65536)
-        {
-            SingleReader = true,
-            SingleWriter = false,
-            FullMode = BoundedChannelFullMode.Wait
-        });
+    private readonly FakeDeviceTransportOptions _options;
+    private readonly Channel<byte> _receiveBytes;
     private readonly FrameDecoder _hostFrameDecoder = new();
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
@@ -30,34 +35,58 @@ public sealed class FakeDeviceTransport : IDeviceTransport
     private ushort _deviceFrameSequence;
     private uint _sampleCounter;
     private uint _deviceTickUs;
-    private bool _isConnected;
+    private int _isConnectedValue;
+    private bool _hasConnected;
     private bool _disposed;
 
-    public bool IsConnected => _isConnected;
+    public FakeDeviceTransport(FakeDeviceTransportOptions? options = null)
+    {
+        _options = options ?? new FakeDeviceTransportOptions();
+        _options.Validate();
+
+        _receiveBytes = Channel.CreateBounded<byte>(
+            new BoundedChannelOptions(ReceiveByteCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                FullMode = BoundedChannelFullMode.Wait,
+                AllowSynchronousContinuations = false
+            });
+    }
+
+    public bool IsConnected => Volatile.Read(ref _isConnectedValue) != 0;
 
     public Task ConnectAsync(CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_isConnected)
+        if (IsConnected)
         {
             throw new InvalidOperationException("Fake transport is already connected.");
         }
 
-        _isConnected = true;
+        if (_hasConnected)
+        {
+            throw new InvalidOperationException(
+                "A disconnected fake transport instance cannot be reused. " +
+                "Create a new instance for the next connection generation.");
+        }
+
+        _hasConnected = true;
+        Volatile.Write(ref _isConnectedValue, 1);
         return Task.CompletedTask;
     }
 
     public async Task DisconnectAsync(CancellationToken cancellationToken)
     {
-        if (!_isConnected)
+        if (!IsConnected)
         {
             return;
         }
 
         await StopStreamingAsync().ConfigureAwait(false);
-        _isConnected = false;
+        Volatile.Write(ref _isConnectedValue, 0);
         _receiveBytes.Writer.TryComplete();
         cancellationToken.ThrowIfCancellationRequested();
     }
@@ -76,17 +105,17 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         byte firstByte = await _receiveBytes.Reader
             .ReadAsync(cancellationToken)
             .ConfigureAwait(false);
-        SetBufferByte(buffer, 0, firstByte);
-        int count = 1;
+        buffer.Span[0] = firstByte;
+        int receivedByteCount = 1;
 
-        while ((count < buffer.Length) &&
+        while ((receivedByteCount < buffer.Length) &&
                _receiveBytes.Reader.TryRead(out byte value))
         {
-            SetBufferByte(buffer, count, value);
-            count++;
+            buffer.Span[receivedByteCount] = value;
+            receivedByteCount++;
         }
 
-        return count;
+        return receivedByteCount;
     }
 
     public async ValueTask WriteAsync(
@@ -120,6 +149,17 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         ProtocolFrame frame,
         CancellationToken cancellationToken)
     {
+        if (_options.CommandResponseDelay > TimeSpan.Zero)
+        {
+            await Task.Delay(_options.CommandResponseDelay, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (_options.SuppressCommandResponses)
+        {
+            return;
+        }
+
         if (frame.Version != ProtocolConstants.WireVersion)
         {
             await SendNackAsync(
@@ -194,7 +234,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
 
         try
         {
-            intervalUs = PayloadCodec.DecodeSetStreamConfig(frame.Payload);
+            intervalUs = PayloadCodec.DecodeSetStreamConfig(frame.Payload.Span);
         }
         catch (ProtocolException)
         {
@@ -204,9 +244,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 cancellationToken).ConfigureAwait(false);
             return;
         }
-
-        if ((intervalUs < ProtocolConstants.MinimumStreamIntervalUs) ||
-            (intervalUs > ProtocolConstants.MaximumStreamIntervalUs))
+        catch (ArgumentOutOfRangeException)
         {
             await SendNackAsync(
                 frame,
@@ -245,7 +283,8 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             sequence,
             PayloadCodec.EncodeDeviceInfo(deviceInfo));
 
-        await QueueFrameAsync(response, cancellationToken).ConfigureAwait(false);
+        await QueueFrameAsync(response, corruptCrc: false, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private Task SendAckAsync(
@@ -257,7 +296,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             MessageType.Ack,
             request.Sequence,
             PayloadCodec.EncodeAck(request.MessageType, ResultCode.Ok));
-        return QueueFrameAsync(response, cancellationToken);
+        return QueueFrameAsync(response, corruptCrc: false, cancellationToken);
     }
 
     private Task SendNackAsync(
@@ -270,16 +309,14 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             MessageType.Nack,
             request.Sequence,
             PayloadCodec.EncodeAck(request.MessageType, resultCode));
-        return QueueFrameAsync(response, cancellationToken);
+        return QueueFrameAsync(response, corruptCrc: false, cancellationToken);
     }
 
     private void StartStreaming()
     {
         _streamCancellation = new CancellationTokenSource();
         CancellationToken streamToken = _streamCancellation.Token;
-        _streamTask = Task.Run(
-            () => StreamLoopAsync(streamToken),
-            CancellationToken.None);
+        _streamTask = RunStreamLoopAsync(streamToken);
     }
 
     private async Task StopStreamingAsync()
@@ -290,7 +327,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         _streamCancellation = null;
         _streamTask = null;
 
-        if (cancellation is null || streamTask is null)
+        if ((cancellation is null) || (streamTask is null))
         {
             return;
         }
@@ -301,12 +338,27 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         {
             await streamTask.ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-        }
         finally
         {
             cancellation.Dispose();
+        }
+    }
+
+    private async Task RunStreamLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await StreamLoopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected when STOP_STREAM or transport shutdown retires the loop.
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            _receiveBytes.Writer.TryComplete(exception);
         }
     }
 
@@ -315,10 +367,16 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         TimeSpan interval = TimeSpan.FromMilliseconds(_streamIntervalUs / 1000.0);
         using var timer = new PeriodicTimer(interval);
 
-        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        while (await timer.WaitForNextTickAsync(cancellationToken)
+                   .ConfigureAwait(false))
         {
             _sampleCounter = unchecked(_sampleCounter + 1U);
             _deviceTickUs = unchecked(_deviceTickUs + _streamIntervalUs);
+
+            if (ShouldDropTelemetrySample(_sampleCounter))
+            {
+                continue;
+            }
 
             double timeSeconds = _deviceTickUs / 1_000_000.0;
             float value = (float)Math.Sin(
@@ -336,15 +394,22 @@ public sealed class FakeDeviceTransport : IDeviceTransport
                 NextDeviceFrameSequence(),
                 PayloadCodec.EncodeTelemetry(sample));
 
-            await QueueFrameAsync(frame, cancellationToken).ConfigureAwait(false);
+            bool corruptCrc = ShouldCorruptTelemetryFrame(_sampleCounter);
+            await QueueFrameAsync(frame, corruptCrc, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
     private async Task QueueFrameAsync(
         ProtocolFrame frame,
+        bool corruptCrc,
         CancellationToken cancellationToken)
     {
         byte[] encoded = FrameEncoder.Encode(frame);
+        if (corruptCrc)
+        {
+            encoded[^1] ^= 0x01;
+        }
 
         foreach (byte value in encoded)
         {
@@ -354,23 +419,29 @@ public sealed class FakeDeviceTransport : IDeviceTransport
         }
     }
 
+    private bool ShouldDropTelemetrySample(uint sampleCounter)
+    {
+        int interval = _options.DropEveryNthTelemetrySample;
+        return (interval > 0) && ((sampleCounter % (uint)interval) == 0U);
+    }
+
+    private bool ShouldCorruptTelemetryFrame(uint sampleCounter)
+    {
+        int interval = _options.CorruptEveryNthTelemetryFrame;
+        return (interval > 0) && ((sampleCounter % (uint)interval) == 0U);
+    }
+
     private ushort NextDeviceFrameSequence()
     {
         _deviceFrameSequence = unchecked((ushort)(_deviceFrameSequence + 1));
         return _deviceFrameSequence;
     }
 
-
-    private static void SetBufferByte(Memory<byte> buffer, int index, byte value)
-    {
-        buffer.Span[index] = value;
-    }
-
     private void EnsureConnected()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (!_isConnected)
+        if (!IsConnected)
         {
             throw new InvalidOperationException("Fake transport is not connected.");
         }
@@ -383,7 +454,7 @@ public sealed class FakeDeviceTransport : IDeviceTransport
             return;
         }
 
-        if (_isConnected)
+        if (IsConnected)
         {
             await DisconnectAsync(CancellationToken.None).ConfigureAwait(false);
         }

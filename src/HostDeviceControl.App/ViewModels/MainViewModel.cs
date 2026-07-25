@@ -1,17 +1,22 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Windows.Threading;
 using HostDeviceControl.App.Infrastructure;
 using HostDeviceControl.App.Services;
 using HostDeviceControl.Core.Abstractions;
+using HostDeviceControl.Core.Concurrency;
 using HostDeviceControl.Core.Device;
+using HostDeviceControl.Core.Diagnostics;
 using HostDeviceControl.Core.Models;
 using HostDeviceControl.Core.Protocol;
 using HostDeviceControl.Transport.Fake;
@@ -20,14 +25,36 @@ using Microsoft.Win32;
 
 namespace HostDeviceControl.App.ViewModels;
 
+/// <summary>
+/// Owns presentation state for the single-node PoC window. Device and protocol
+/// state remain authoritative in <see cref="DeviceSession"/>.
+/// </summary>
 public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 {
     private const string FakeConnectionMode = "Fake Device";
     private const string SerialConnectionMode = "Serial Port";
+    private const string RecordingStoppedText = "Stopped";
     private const int MaximumChartSamples = 2000;
     private const int MaximumLogEntries = 500;
+    private const int UiTelemetryCapacity = 2048;
+    private const int MaximumSamplesPerUiTick = 512;
+    private const int DiagnosticCapacity = 256;
+    private const int MaximumDiagnosticsPerUiTick = 64;
+    private const int UiRefreshIntervalMilliseconds = 50;
 
-    private readonly ConcurrentQueue<TelemetrySample> _telemetryQueue = new();
+    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(5);
+
+    private readonly Dispatcher _dispatcher;
+    private readonly TimeProvider _timeProvider;
+    private readonly CancellationTokenSource _applicationCancellation = new();
+    private readonly BoundedDropOldestBuffer<TelemetrySample> _telemetryBuffer =
+        new(UiTelemetryCapacity);
+    private readonly List<TelemetrySample> _uiDrainBuffer =
+        new(MaximumSamplesPerUiTick);
+    private readonly BoundedDropOldestBuffer<string> _diagnosticBuffer =
+        new(DiagnosticCapacity);
+    private readonly List<string> _diagnosticDrainBuffer =
+        new(MaximumDiagnosticsPerUiTick);
     private readonly List<double> _chartHistory = new(MaximumChartSamples);
     private readonly DispatcherTimer _uiTimer;
     private readonly CsvTelemetryRecorder _recorder = new();
@@ -35,53 +62,79 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private DeviceSession? _session;
     private string _selectedConnectionMode = FakeConnectionMode;
     private string? _selectedPortName;
-    private string _baudRate = "115200";
+    private string _baudRate = SerialTransportOptions.DefaultBaudRate.ToString(
+        CultureInfo.InvariantCulture);
     private string _sessionState = DeviceSessionState.Disconnected.ToString();
     private string _deviceSummary = "Not connected";
-    private string _statusMessage = "Ready. Use Fake Device to run without hardware.";
-    private string _recordingStatus = "Stopped";
+    private string _statusMessage =
+        "Ready. Use Fake Device to run without hardware.";
+    private string _recordingStatus = RecordingStoppedText;
     private IReadOnlyList<double> _chartSamples = Array.Empty<double>();
     private long _receivedFrameCount;
     private long _receivedSampleCount;
     private long _receivedSampleCounter;
     private long _crcErrorCount;
+    private long _formatErrorCount;
+    private long _unknownMessageTypeCount;
     private long _lostSampleCount;
+    private long _uiDropCount;
+    private int _uiQueueDepth;
     private long _recorderDropCount;
+    private long _diagnosticDropCount;
     private uint _latestDeviceTickUs;
+    private bool _isShuttingDown;
     private bool _disposed;
 
-    public MainViewModel()
+    /// <summary>
+    /// Initializes the presentation model with an explicit UI dispatcher and
+    /// optional time provider for deterministic tests.
+    /// </summary>
+    public MainViewModel(
+        Dispatcher dispatcher,
+        TimeProvider? timeProvider = null)
     {
+        _dispatcher = dispatcher ??
+            throw new ArgumentNullException(nameof(dispatcher));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+
         ConnectionModes = [FakeConnectionMode, SerialConnectionMode];
         PortNames = new ObservableCollection<string>();
         LogEntries = new ObservableCollection<string>();
 
-        RefreshPortsCommand = new RelayCommand(RefreshPorts);
-        ConnectCommand = new AsyncRelayCommand(
+        RefreshPortsCommand = new RelayCommand(
+            RefreshPorts,
+            () => IsConnectionConfigurationEditable && IsSerialMode);
+        ConnectCommand = CreateAsyncCommand(
             ConnectAsync,
-            () => _session is null ||
-                  _session.State == DeviceSessionState.Disconnected);
-        DisconnectCommand = new AsyncRelayCommand(
+            () => !_isShuttingDown &&
+                  (_session is null ||
+                   _session.State == DeviceSessionState.Disconnected));
+        DisconnectCommand = CreateAsyncCommand(
             DisconnectAsync,
-            () => _session is not null &&
+            () => !_isShuttingDown &&
+                  _session is not null &&
                   _session.State != DeviceSessionState.Disconnected);
-        StartStreamCommand = new AsyncRelayCommand(
+        StartStreamCommand = CreateAsyncCommand(
             StartStreamingAsync,
-            () => _session?.State == DeviceSessionState.Ready);
-        StopStreamCommand = new AsyncRelayCommand(
+            () => !_isShuttingDown &&
+                  _session?.State == DeviceSessionState.Ready);
+        StopStreamCommand = CreateAsyncCommand(
             StopStreamingAsync,
-            () => _session?.State == DeviceSessionState.Streaming);
+            () => !_isShuttingDown &&
+                  _session?.State == DeviceSessionState.Streaming);
         ClearChartCommand = new RelayCommand(ClearChart);
-        StartRecordingCommand = new AsyncRelayCommand(
+        StartRecordingCommand = CreateAsyncCommand(
             StartRecordingAsync,
-            () => !_recorder.IsRecording);
-        StopRecordingCommand = new AsyncRelayCommand(
+            () => !_isShuttingDown && !_recorder.IsRecording);
+        StopRecordingCommand = CreateAsyncCommand(
             StopRecordingAsync,
-            () => _recorder.IsRecording);
+            () => !_isShuttingDown && _recorder.IsRecording);
 
-        _uiTimer = new DispatcherTimer(DispatcherPriority.Background)
+        _recorder.OverrunDetected += OnRecorderOverrunDetected;
+
+        _uiTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher)
         {
-            Interval = TimeSpan.FromMilliseconds(50)
+            Interval = TimeSpan.FromMilliseconds(UiRefreshIntervalMilliseconds)
         };
         _uiTimer.Tick += OnUiTimerTick;
         _uiTimer.Start();
@@ -120,6 +173,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             if (SetProperty(ref _selectedConnectionMode, value))
             {
                 OnPropertyChanged(nameof(IsSerialMode));
+                OnPropertyChanged(nameof(IsSerialConfigurationEditable));
                 RaiseCommandStates();
             }
         }
@@ -130,6 +184,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             SelectedConnectionMode,
             SerialConnectionMode,
             StringComparison.Ordinal);
+
+    public bool IsConnectionConfigurationEditable =>
+        !_isShuttingDown &&
+        (_session is null ||
+         _session.State == DeviceSessionState.Disconnected);
+
+    public bool IsSerialConfigurationEditable =>
+        IsSerialMode && IsConnectionConfigurationEditable;
 
     public string? SelectedPortName
     {
@@ -191,10 +253,34 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _crcErrorCount, value);
     }
 
+    public long FormatErrorCount
+    {
+        get => _formatErrorCount;
+        private set => SetProperty(ref _formatErrorCount, value);
+    }
+
+    public long UnknownMessageTypeCount
+    {
+        get => _unknownMessageTypeCount;
+        private set => SetProperty(ref _unknownMessageTypeCount, value);
+    }
+
     public long LostSampleCount
     {
         get => _lostSampleCount;
         private set => SetProperty(ref _lostSampleCount, value);
+    }
+
+    public long UiDropCount
+    {
+        get => _uiDropCount;
+        private set => SetProperty(ref _uiDropCount, value);
+    }
+
+    public int UiQueueDepth
+    {
+        get => _uiQueueDepth;
+        private set => SetProperty(ref _uiQueueDepth, value);
     }
 
     public long RecorderDropCount
@@ -203,10 +289,26 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         private set => SetProperty(ref _recorderDropCount, value);
     }
 
+    public long DiagnosticDropCount
+    {
+        get => _diagnosticDropCount;
+        private set => SetProperty(ref _diagnosticDropCount, value);
+    }
+
     public uint LatestDeviceTickUs
     {
         get => _latestDeviceTickUs;
         private set => SetProperty(ref _latestDeviceTickUs, value);
+    }
+
+    private AsyncRelayCommand CreateAsyncCommand(
+        Func<Task> executeAsync,
+        Func<bool> canExecute)
+    {
+        return new AsyncRelayCommand(
+            executeAsync,
+            HandleUnexpectedCommandException,
+            canExecute);
     }
 
     private void RefreshPorts()
@@ -238,16 +340,24 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private async Task ConnectAsync()
     {
+        CancellationToken cancellationToken = _applicationCancellation.Token;
+        IDeviceTransport? transport = null;
+        DeviceSession? session = null;
+
         try
         {
-            IDeviceTransport transport = CreateTransport();
-            var session = new DeviceSession(transport);
+            transport = CreateTransport();
+            session = new DeviceSession(
+                transport,
+                DeviceSessionOptions.Default,
+                _timeProvider);
+            transport = null;
             SubscribeSession(session);
             _session = session;
-            RaiseCommandStates();
+            NotifySessionOwnershipChanged();
 
             StatusMessage = $"Connecting through {SelectedConnectionMode}...";
-            await session.ConnectAsync(CancellationToken.None);
+            await session.ConnectAsync(cancellationToken);
 
             DeviceInfo? info = session.DeviceInfo;
             DeviceSummary = info is null
@@ -256,21 +366,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                   $"Type 0x{info.DeviceType:X4}";
             StatusMessage = "Connected and ready.";
         }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            StatusMessage = "Connection cancelled.";
+            await CleanupFailedConnectionAsync(session, transport);
+            throw;
+        }
         catch (Exception exception)
         {
             AddLog($"Connect failed: {exception.Message}");
             StatusMessage = "Connection failed.";
-
-            if (_session is not null)
-            {
-                UnsubscribeSession(_session);
-                await _session.DisposeAsync();
-                _session = null;
-            }
-
-            SessionState = DeviceSessionState.Disconnected.ToString();
-            DeviceSummary = "Not connected";
-            RaiseCommandStates();
+            await CleanupFailedConnectionAsync(session, transport);
         }
     }
 
@@ -291,16 +398,22 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
                 out int baudRate) ||
-            baudRate <= 0)
+            (baudRate <= 0))
         {
-            throw new InvalidOperationException("Baud rate must be a positive integer.");
+            throw new InvalidOperationException(
+                "Baud rate must be a positive integer.");
         }
 
         return new SerialDeviceTransport(
             new SerialTransportOptions(SelectedPortName, baudRate));
     }
 
-    private async Task DisconnectAsync()
+    private Task DisconnectAsync()
+    {
+        return DisconnectCoreAsync(_applicationCancellation.Token);
+    }
+
+    private async Task DisconnectCoreAsync(CancellationToken cancellationToken)
     {
         DeviceSession? session = _session;
         if (session is null)
@@ -312,32 +425,37 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (session.State == DeviceSessionState.Streaming)
             {
-                await session.StopStreamingAsync(CancellationToken.None);
+                await session.StopStreamingAsync(cancellationToken);
             }
+
+            await session.DisconnectAsync(cancellationToken);
+            await session.DisposeAsync();
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
-            AddLog($"Stop during disconnect failed: {exception.Message}");
+            AddLog($"Disconnect incomplete: {exception.Message}");
+            StatusMessage =
+                "Disconnect did not complete cleanly; retry or close the app.";
+            SessionState = session.State.ToString();
+            RaiseCommandStates();
+            return;
         }
 
-        try
+        UnsubscribeSession(session);
+        if (ReferenceEquals(_session, session))
         {
-            await session.DisconnectAsync(CancellationToken.None);
-        }
-        catch (Exception exception)
-        {
-            AddLog($"Disconnect failed: {exception.Message}");
-        }
-        finally
-        {
-            UnsubscribeSession(session);
-            await session.DisposeAsync();
             _session = null;
-            SessionState = DeviceSessionState.Disconnected.ToString();
-            DeviceSummary = "Not connected";
-            StatusMessage = "Disconnected.";
-            RaiseCommandStates();
         }
+
+        SessionState = DeviceSessionState.Disconnected.ToString();
+        DeviceSummary = "Not connected";
+        StatusMessage = "Disconnected.";
+        NotifySessionOwnershipChanged();
     }
 
     private async Task StartStreamingAsync()
@@ -349,8 +467,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             await session.StartStreamingAsync(
                 ProtocolConstants.DefaultStreamIntervalUs,
-                CancellationToken.None);
+                _applicationCancellation.Token);
             StatusMessage = "Receiving 200 Hz telemetry.";
+        }
+        catch (OperationCanceledException)
+            when (_applicationCancellation.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -366,8 +489,13 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            await session.StopStreamingAsync(CancellationToken.None);
+            await session.StopStreamingAsync(_applicationCancellation.Token);
             StatusMessage = "Streaming stopped.";
+        }
+        catch (OperationCanceledException)
+            when (_applicationCancellation.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -384,7 +512,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
             DefaultExt = ".csv",
             AddExtension = true,
-            FileName = $"telemetry-{DateTime.Now:yyyyMMdd-HHmmss}.csv"
+            FileName =
+                $"telemetry-{_timeProvider.GetLocalNow():yyyyMMdd-HHmmss}.csv"
         };
 
         if (dialog.ShowDialog() != true)
@@ -399,10 +528,17 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            await _recorder.StartAsync(filePath, CancellationToken.None);
-            RecordingStatus = filePath;
+            await _recorder.StartAsync(
+                filePath,
+                _applicationCancellation.Token);
+            RecordingStatus = Path.GetFileName(filePath);
             StatusMessage = "Telemetry recording started.";
-            AddLog($"Recording to {filePath}.");
+            AddLog($"Recording started: {Path.GetFileName(filePath)}.");
+        }
+        catch (OperationCanceledException)
+            when (_applicationCancellation.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -419,10 +555,15 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
-            await _recorder.StopAsync();
-            RecordingStatus = "Stopped";
+            await _recorder.StopAsync(_applicationCancellation.Token);
+            RecordingStatus = RecordingStoppedText;
             StatusMessage = "Telemetry recording stopped.";
             AddLog("Recording stopped.");
+        }
+        catch (OperationCanceledException)
+            when (_applicationCancellation.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception)
         {
@@ -437,11 +578,9 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private void ClearChart()
     {
         _chartHistory.Clear();
-        while (_telemetryQueue.TryDequeue(out _))
-        {
-        }
-
+        _telemetryBuffer.Clear();
         ChartSamples = Array.Empty<double>();
+        UiQueueDepth = 0;
         StatusMessage = "Waveform cleared.";
     }
 
@@ -461,16 +600,18 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnSessionStateChanged(DeviceSessionState state)
     {
-        _ = Application.Current.Dispatcher.InvokeAsync(() =>
+        PostToUi(() =>
         {
             SessionState = state.ToString();
+            OnPropertyChanged(nameof(IsConnectionConfigurationEditable));
+            OnPropertyChanged(nameof(IsSerialConfigurationEditable));
             RaiseCommandStates();
         });
     }
 
     private void OnTelemetryReceived(TelemetrySample sample)
     {
-        _telemetryQueue.Enqueue(sample);
+        _telemetryBuffer.Enqueue(sample);
         Interlocked.Increment(ref _receivedSampleCounter);
 
         if (_recorder.IsRecording)
@@ -481,29 +622,53 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
     private void OnDiagnosticMessage(string message)
     {
-        _ = Application.Current.Dispatcher.InvokeAsync(() => AddLog(message));
+        _diagnosticBuffer.Enqueue(DiagnosticText.Sanitize(message));
+    }
+
+    private void OnRecorderOverrunDetected(long droppedSampleCount)
+    {
+        PostToUi(() =>
+        {
+            AddLog(
+                $"Recording queue overrun detected; dropped samples: " +
+                $"{droppedSampleCount}.");
+            StatusMessage =
+                "Recording is incomplete because the storage queue overran.";
+        });
     }
 
     private void OnUiTimerTick(object? sender, EventArgs e)
     {
-        bool chartChanged = false;
-
-        while (_telemetryQueue.TryDequeue(out TelemetrySample sample))
+        _diagnosticDrainBuffer.Clear();
+        _diagnosticBuffer.DrainTo(
+            _diagnosticDrainBuffer,
+            MaximumDiagnosticsPerUiTick);
+        foreach (string diagnostic in _diagnosticDrainBuffer)
         {
-            _chartHistory.Add(sample.SineValue);
-            LatestDeviceTickUs = sample.DeviceTickUs;
-            chartChanged = true;
+            AddLog(diagnostic);
         }
 
-        if (_chartHistory.Count > MaximumChartSamples)
-        {
-            int removeCount = _chartHistory.Count - MaximumChartSamples;
-            _chartHistory.RemoveRange(0, removeCount);
-            chartChanged = true;
-        }
+        DiagnosticDropCount = _diagnosticBuffer.DroppedItemCount;
 
-        if (chartChanged)
+        _uiDrainBuffer.Clear();
+        int drainedSampleCount = _telemetryBuffer.DrainTo(
+            _uiDrainBuffer,
+            MaximumSamplesPerUiTick);
+
+        if (drainedSampleCount > 0)
         {
+            foreach (TelemetrySample sample in _uiDrainBuffer)
+            {
+                _chartHistory.Add(sample.SineValue);
+                LatestDeviceTickUs = sample.DeviceTickUs;
+            }
+
+            if (_chartHistory.Count > MaximumChartSamples)
+            {
+                int removeCount = _chartHistory.Count - MaximumChartSamples;
+                _chartHistory.RemoveRange(0, removeCount);
+            }
+
             ChartSamples = _chartHistory.ToArray();
         }
 
@@ -512,16 +677,64 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             ReceivedFrameCount = session.ReceivedFrameCount;
             CrcErrorCount = session.CrcErrorCount;
+            FormatErrorCount = session.FormatErrorCount;
+            UnknownMessageTypeCount = session.UnknownMessageTypeCount;
             LostSampleCount = session.LostSampleCount;
         }
 
         ReceivedSampleCount = Interlocked.Read(ref _receivedSampleCounter);
+        UiDropCount = _telemetryBuffer.DroppedItemCount;
+        UiQueueDepth = _telemetryBuffer.Count;
         RecorderDropCount = _recorder.DroppedSampleCount;
+    }
+
+    private async Task CleanupFailedConnectionAsync(
+        DeviceSession? session,
+        IDeviceTransport? transport)
+    {
+        bool cleanupCompleted = true;
+
+        try
+        {
+            if (session is not null)
+            {
+                await session.DisposeAsync();
+            }
+            else if (transport is not null)
+            {
+                await transport.DisposeAsync();
+            }
+        }
+        catch (Exception cleanupException)
+        {
+            cleanupCompleted = false;
+            AddLog($"Connection cleanup incomplete: {cleanupException.Message}");
+            StatusMessage =
+                "Connection failed and cleanup is incomplete; retry disconnect.";
+        }
+
+        if (cleanupCompleted && (session is not null))
+        {
+            UnsubscribeSession(session);
+        }
+
+        if (cleanupCompleted && ReferenceEquals(_session, session))
+        {
+            _session = null;
+        }
+
+        SessionState = cleanupCompleted
+            ? DeviceSessionState.Disconnected.ToString()
+            : session?.State.ToString() ?? DeviceSessionState.Faulted.ToString();
+        DeviceSummary = "Not connected";
+        NotifySessionOwnershipChanged();
     }
 
     private void AddLog(string message)
     {
-        string entry = $"{DateTime.Now:HH:mm:ss.fff}  {message}";
+        string sanitizedMessage = DiagnosticText.Sanitize(message);
+        DateTimeOffset localTime = _timeProvider.GetLocalNow();
+        string entry = $"{localTime:HH:mm:ss.fff}  {sanitizedMessage}";
         LogEntries.Add(entry);
 
         while (LogEntries.Count > MaximumLogEntries)
@@ -530,8 +743,56 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private void HandleUnexpectedCommandException(Exception exception)
+    {
+        PostToUi(() =>
+        {
+            AddLog($"Unexpected command failure: {exception.Message}");
+            StatusMessage = "An unexpected operation failure occurred.";
+        });
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (_dispatcher.HasShutdownStarted || _dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        if (_dispatcher.CheckAccess())
+        {
+            ExecuteUiAction(action);
+            return;
+        }
+
+        _dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => ExecuteUiAction(action)));
+    }
+
+    private void ExecuteUiAction(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            StatusMessage = "A presentation update failed.";
+        }
+    }
+
+    private void NotifySessionOwnershipChanged()
+    {
+        OnPropertyChanged(nameof(IsConnectionConfigurationEditable));
+        OnPropertyChanged(nameof(IsSerialConfigurationEditable));
+        RaiseCommandStates();
+    }
+
     private void RaiseCommandStates()
     {
+        RefreshPortsCommand.RaiseCanExecuteChanged();
         ConnectCommand.RaiseCanExecuteChanged();
         DisconnectCommand.RaiseCanExecuteChanged();
         StartStreamCommand.RaiseCanExecuteChanged();
@@ -540,6 +801,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         StopRecordingCommand.RaiseCanExecuteChanged();
     }
 
+    /// <summary>
+    /// Cancels application work and performs a bounded, retryable shutdown. A
+    /// timeout is surfaced to the window so incomplete shutdown is not hidden.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -547,18 +812,53 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        _isShuttingDown = true;
+        NotifySessionOwnershipChanged();
         _uiTimer.Stop();
         _uiTimer.Tick -= OnUiTimerTick;
+        _applicationCancellation.Cancel();
 
-        await _recorder.DisposeAsync();
+        using var shutdownCancellation = new CancellationTokenSource(
+            ShutdownTimeout);
+        CancellationToken shutdownToken = shutdownCancellation.Token;
 
-        if (_session is not null)
+        DeviceSession? session = _session;
+        if (session is not null)
         {
-            UnsubscribeSession(_session);
-            await _session.DisposeAsync();
+            try
+            {
+                if (session.State == DeviceSessionState.Streaming)
+                {
+                    await session.StopStreamingAsync(shutdownToken);
+                }
+            }
+            catch (OperationCanceledException)
+                when (shutdownToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                AddLog($"Stop during shutdown failed: {exception.Message}");
+            }
+        }
+
+        if (_recorder.IsRecording)
+        {
+            await _recorder.StopAsync(shutdownToken);
+        }
+
+        if (session is not null)
+        {
+            await session.DisconnectAsync(shutdownToken);
+            await session.DisposeAsync();
+            UnsubscribeSession(session);
             _session = null;
         }
 
+        _recorder.OverrunDetected -= OnRecorderOverrunDetected;
+        await _recorder.DisposeAsync();
+        _applicationCancellation.Dispose();
         _disposed = true;
     }
 }

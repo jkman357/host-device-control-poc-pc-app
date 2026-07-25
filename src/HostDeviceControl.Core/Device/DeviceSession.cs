@@ -1,43 +1,72 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
 using System.Collections.Concurrent;
-using System.Linq;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using HostDeviceControl.Core.Abstractions;
+using HostDeviceControl.Core.Diagnostics;
 using HostDeviceControl.Core.Models;
 using HostDeviceControl.Core.Protocol;
 
 namespace HostDeviceControl.Core.Device;
 
+/// <summary>
+/// Owns one transport, one receive loop, request correlation, protocol state,
+/// and deterministic shutdown for a single Coordinator-to-Node relationship.
+/// </summary>
 public sealed class DeviceSession : IAsyncDisposable
 {
-    private static readonly TimeSpan DefaultCommandTimeout = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan StopCommandTimeout = TimeSpan.FromMilliseconds(1500);
+    private const int MaximumPendingRequestCount = 8;
 
     private readonly IDeviceTransport _transport;
-    private readonly FrameDecoder _decoder = new();
-    private readonly ConcurrentDictionary<ushort, TaskCompletionSource<ProtocolFrame>>
-        _pendingResponses = new();
+    private readonly DeviceSessionOptions _options;
+    private readonly TimeProvider _timeProvider;
+    private FrameDecoder _decoder = new();
+    private readonly ConcurrentDictionary<ushort, PendingRequest> _pendingResponses = new();
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
 
     private CancellationTokenSource? _receiveCancellation;
     private Task? _receiveTask;
     private int _stateValue = (int)DeviceSessionState.Disconnected;
     private int _sequenceValue;
+    private long _connectionGeneration;
     private long _receivedFrameCount;
     private long _lostSampleCount;
     private uint? _lastSampleCounter;
     private bool _disposed;
 
-    public DeviceSession(IDeviceTransport transport)
+    /// <summary>
+    /// Initializes a session and takes ownership of the supplied transport.
+    /// </summary>
+    public DeviceSession(
+        IDeviceTransport transport,
+        DeviceSessionOptions? options = null,
+        TimeProvider? timeProvider = null)
     {
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
+        _options = options ?? DeviceSessionOptions.Default;
+        _options.Validate();
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>
+    /// Raised after the authoritative session state changes.
+    /// Subscribers are isolated so a presentation failure cannot terminate the
+    /// receive loop.
+    /// </summary>
     public event Action<DeviceSessionState>? StateChanged;
 
+    /// <summary>
+    /// Raised for each validated telemetry sample.
+    /// </summary>
     public event Action<TelemetrySample>? TelemetryReceived;
 
+    /// <summary>
+    /// Raised for bounded, single-line engineering diagnostics.
+    /// </summary>
     public event Action<string>? DiagnosticMessage;
 
     public DeviceSessionState State =>
@@ -45,14 +74,25 @@ public sealed class DeviceSession : IAsyncDisposable
 
     public DeviceInfo? DeviceInfo { get; private set; }
 
-    public long ReceivedFrameCount => Interlocked.Read(ref _receivedFrameCount);
+    public long ConnectionGeneration =>
+        Interlocked.Read(ref _connectionGeneration);
 
-    public long LostSampleCount => Interlocked.Read(ref _lostSampleCount);
+    public long ReceivedFrameCount =>
+        Interlocked.Read(ref _receivedFrameCount);
+
+    public long LostSampleCount =>
+        Interlocked.Read(ref _lostSampleCount);
 
     public long CrcErrorCount => _decoder.CrcErrorCount;
 
     public long FormatErrorCount => _decoder.FormatErrorCount;
 
+    public long UnknownMessageTypeCount => _decoder.UnknownMessageTypeCount;
+
+    /// <summary>
+    /// Opens the transport, starts the owned receive loop, and completes the
+    /// device-information handshake.
+    /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
@@ -61,33 +101,49 @@ public sealed class DeviceSession : IAsyncDisposable
         try
         {
             EnsureState(DeviceSessionState.Disconnected);
+            _decoder = new FrameDecoder();
+            Interlocked.Exchange(ref _receivedFrameCount, 0);
+            Interlocked.Exchange(ref _lostSampleCount, 0);
+            _lastSampleCounter = null;
+            long generation = Interlocked.Increment(ref _connectionGeneration);
             SetState(DeviceSessionState.Connecting);
 
             await _transport.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
             _receiveCancellation = new CancellationTokenSource();
             CancellationToken receiveToken = _receiveCancellation.Token;
-            _receiveTask = Task.Run(
-                () => ReceiveLoopAsync(receiveToken),
-                CancellationToken.None);
+            _receiveTask = ReceiveLoopAsync(generation, receiveToken);
 
             SetState(DeviceSessionState.Handshaking);
             ProtocolFrame response = await SendRequestAsync(
+                generation,
                 MessageType.GetDeviceInfo,
                 [],
-                DefaultCommandTimeout,
+                _options.CommandTimeout,
                 cancellationToken,
                 MessageType.DeviceInfo).ConfigureAwait(false);
 
-            DeviceInfo = PayloadCodec.DecodeDeviceInfo(response.Payload);
-            DiagnosticMessage?.Invoke(
-                $"Handshake completed: {DeviceInfo.DeviceName} FW {DeviceInfo.FirmwareVersion}.");
+            DeviceInfo = PayloadCodec.DecodeDeviceInfo(response.Payload.Span);
+            PublishDiagnostic(
+                $"Handshake completed: {DeviceInfo.DeviceName} FW " +
+                $"{DeviceInfo.FirmwareVersion}.");
             SetState(DeviceSessionState.Ready);
         }
         catch
         {
             SetState(DeviceSessionState.Faulted);
-            await DisconnectCoreAsync(CancellationToken.None).ConfigureAwait(false);
+
+            try
+            {
+                await DisconnectCoreAsync(CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception cleanupException)
+            {
+                PublishDiagnostic(
+                    $"Connection cleanup failed: {cleanupException.Message}");
+            }
+
             throw;
         }
         finally
@@ -96,6 +152,10 @@ public sealed class DeviceSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Configures and starts telemetry streaming at the requested interval in
+    /// microseconds.
+    /// </summary>
     public async Task StartStreamingAsync(
         ushort intervalUs,
         CancellationToken cancellationToken)
@@ -106,67 +166,30 @@ public sealed class DeviceSession : IAsyncDisposable
         try
         {
             EnsureState(DeviceSessionState.Ready);
-
-            if ((intervalUs < ProtocolConstants.MinimumStreamIntervalUs) ||
-                (intervalUs > ProtocolConstants.MaximumStreamIntervalUs))
-            {
-                throw new ArgumentOutOfRangeException(nameof(intervalUs));
-            }
+            ValidateStreamInterval(intervalUs);
+            long generation = ConnectionGeneration;
 
             SetState(DeviceSessionState.StartingStream);
 
             await SendRequestAsync(
+                generation,
                 MessageType.SetStreamConfig,
                 PayloadCodec.EncodeSetStreamConfig(intervalUs),
-                DefaultCommandTimeout,
+                _options.CommandTimeout,
                 cancellationToken,
                 MessageType.Ack).ConfigureAwait(false);
 
             await SendRequestAsync(
+                generation,
                 MessageType.StartStream,
                 [],
-                DefaultCommandTimeout,
+                _options.CommandTimeout,
                 cancellationToken,
                 MessageType.Ack).ConfigureAwait(false);
 
             _lastSampleCounter = null;
             SetState(DeviceSessionState.Streaming);
-            DiagnosticMessage?.Invoke($"Streaming started at {intervalUs} us interval.");
-        }
-        catch
-        {
-            if (State != DeviceSessionState.Faulted)
-            {
-                SetState(DeviceSessionState.Ready);
-            }
-
-            throw;
-        }
-        finally
-        {
-            _lifecycleGate.Release();
-        }
-    }
-
-    public async Task StopStreamingAsync(CancellationToken cancellationToken)
-    {
-        ThrowIfDisposed();
-        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-        try
-        {
-            EnsureState(DeviceSessionState.Streaming);
-            SetState(DeviceSessionState.StoppingStream);
-
-            await SendRequestAsync(
-                MessageType.StopStream,
-                [],
-                StopCommandTimeout,
-                cancellationToken,
-                MessageType.Ack).ConfigureAwait(false);
-
-            SetState(DeviceSessionState.Ready);
-            DiagnosticMessage?.Invoke("Streaming stopped.");
+            PublishDiagnostic($"Streaming started at {intervalUs} us interval.");
         }
         catch
         {
@@ -179,6 +202,46 @@ public sealed class DeviceSession : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Requests an orderly end to telemetry streaming.
+    /// </summary>
+    public async Task StopStreamingAsync(CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            EnsureState(DeviceSessionState.Streaming);
+            long generation = ConnectionGeneration;
+            SetState(DeviceSessionState.StoppingStream);
+
+            await SendRequestAsync(
+                generation,
+                MessageType.StopStream,
+                [],
+                _options.StopStreamTimeout,
+                cancellationToken,
+                MessageType.Ack).ConfigureAwait(false);
+
+            SetState(DeviceSessionState.Ready);
+            PublishDiagnostic("Streaming stopped.");
+        }
+        catch
+        {
+            SetState(DeviceSessionState.Faulted);
+            throw;
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Cancels generation-owned work, closes the transport, and waits for the
+    /// receive loop within the configured shutdown bound.
+    /// </summary>
     public async Task DisconnectAsync(CancellationToken cancellationToken)
     {
         if (_disposed)
@@ -199,6 +262,7 @@ public sealed class DeviceSession : IAsyncDisposable
     }
 
     private async Task<ProtocolFrame> SendRequestAsync(
+        long generation,
         MessageType requestType,
         byte[] payload,
         TimeSpan timeout,
@@ -210,14 +274,33 @@ public sealed class DeviceSession : IAsyncDisposable
             throw new InvalidOperationException("Transport is not connected.");
         }
 
+        if (generation != ConnectionGeneration)
+        {
+            throw new InvalidOperationException("Connection generation is stale.");
+        }
+
+        if (_pendingResponses.Count >= MaximumPendingRequestCount)
+        {
+            throw new InvalidOperationException(
+                "Pending-request capacity has been reached.");
+        }
+
         ushort sequence = NextSequence();
         var completion = new TaskCompletionSource<ProtocolFrame>(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var pendingRequest = new PendingRequest(
+            generation,
+            completion);
 
-        if (!_pendingResponses.TryAdd(sequence, completion))
+        if (!_pendingResponses.TryAdd(sequence, pendingRequest))
         {
             throw new InvalidOperationException("Unable to allocate command sequence.");
         }
+
+        using var commandCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        commandCancellation.CancelAfter(timeout);
+        CancellationToken commandToken = commandCancellation.Token;
 
         try
         {
@@ -228,43 +311,25 @@ public sealed class DeviceSession : IAsyncDisposable
                 payload);
             byte[] encoded = FrameEncoder.Encode(request);
 
-            await _transport.WriteAsync(encoded, cancellationToken).ConfigureAwait(false);
-            DiagnosticMessage?.Invoke($"TX {requestType} seq={sequence}.");
+            await _transport.WriteAsync(encoded, commandToken)
+                .ConfigureAwait(false);
+            PublishDiagnostic($"TX {requestType} seq={sequence}.");
 
             ProtocolFrame response = await completion.Task
-                .WaitAsync(timeout, cancellationToken)
+                .WaitAsync(commandToken)
                 .ConfigureAwait(false);
-
-            if (response.MessageType == MessageType.Nack)
-            {
-                (MessageType rejectedRequest, ResultCode resultCode) =
-                    PayloadCodec.DecodeAck(response.Payload);
-                throw new DeviceCommandException(
-                    rejectedRequest,
-                    resultCode,
-                    $"Device rejected {rejectedRequest}: {resultCode}.");
-            }
-
-            if (!validResponseTypes.Contains(response.MessageType))
-            {
-                throw new ProtocolException(
-                    $"Unexpected response {response.MessageType} for {requestType}.");
-            }
-
-            if (response.MessageType == MessageType.Ack)
-            {
-                (MessageType acknowledgedRequest, ResultCode resultCode) =
-                    PayloadCodec.DecodeAck(response.Payload);
-
-                if ((acknowledgedRequest != requestType) ||
-                    (resultCode != ResultCode.Ok))
-                {
-                    throw new ProtocolException(
-                        $"ACK does not match request {requestType}.");
-                }
-            }
-
+            ValidateResponse(requestType, response, validResponseTypes);
             return response;
+        }
+        catch (OperationCanceledException exception)
+            when (!cancellationToken.IsCancellationRequested &&
+                  commandCancellation.IsCancellationRequested)
+        {
+            PublishDiagnostic(
+                $"Timeout waiting for {requestType} seq={sequence}.");
+            throw new TimeoutException(
+                $"Command {requestType} timed out after {timeout}.",
+                exception);
         }
         finally
         {
@@ -272,9 +337,11 @@ public sealed class DeviceSession : IAsyncDisposable
         }
     }
 
-    private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
+    private async Task ReceiveLoopAsync(
+        long generation,
+        CancellationToken cancellationToken)
     {
-        byte[] receiveBuffer = new byte[1024];
+        byte[] receiveBuffer = new byte[_options.ReceiveBufferSizeBytes];
 
         try
         {
@@ -289,85 +356,91 @@ public sealed class DeviceSession : IAsyncDisposable
                     continue;
                 }
 
-                AppendReceivedBytes(_decoder, receiveBuffer, receivedLength);
+                _decoder.Append(receiveBuffer.AsSpan(0, receivedLength));
 
                 while (_decoder.TryRead(out ProtocolFrame? frame))
                 {
                     if (frame is not null)
                     {
-                        HandleFrame(frame);
+                        HandleFrame(generation, frame);
                     }
                 }
             }
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
         {
+            // Expected during generation cancellation and orderly shutdown.
         }
-        catch (Exception) when (
-            cancellationToken.IsCancellationRequested ||
-            State == DeviceSessionState.Disconnecting)
+        catch (Exception exception)
+            when (cancellationToken.IsCancellationRequested ||
+                  (State == DeviceSessionState.Disconnecting))
         {
+            Debug.WriteLine(exception);
         }
         catch (Exception exception)
         {
-            DiagnosticMessage?.Invoke($"Receive loop failed: {exception.Message}");
+            PublishDiagnostic($"Receive loop failed: {exception.Message}");
+            FailPendingRequests(generation, exception);
 
-            foreach (TaskCompletionSource<ProtocolFrame> completion in
-                     _pendingResponses.Values)
+            if (generation == ConnectionGeneration)
             {
-                completion.TrySetException(exception);
+                SetState(DeviceSessionState.Faulted);
             }
-
-            SetState(DeviceSessionState.Faulted);
         }
     }
 
-
-    private static void AppendReceivedBytes(
-        FrameDecoder decoder,
-        byte[] receiveBuffer,
-        int receivedLength)
+    private void HandleFrame(long generation, ProtocolFrame frame)
     {
-        decoder.Append(receiveBuffer.AsSpan(0, receivedLength));
-    }
+        if (generation != ConnectionGeneration)
+        {
+            PublishDiagnostic(
+                $"Ignored stale-generation frame seq={frame.Sequence}.");
+            return;
+        }
 
-    private void HandleFrame(ProtocolFrame frame)
-    {
         Interlocked.Increment(ref _receivedFrameCount);
 
         if (frame.Version != ProtocolConstants.WireVersion)
         {
-            DiagnosticMessage?.Invoke(
+            PublishDiagnostic(
                 $"Ignored unsupported protocol version 0x{frame.Version:X2}.");
             return;
         }
 
         if (frame.MessageType == MessageType.TelemetrySample)
         {
-            try
-            {
-                TelemetrySample sample = PayloadCodec.DecodeTelemetry(
-                    frame.Payload,
-                    DateTimeOffset.UtcNow);
-                UpdateLossCount(sample.SampleCounter);
-                TelemetryReceived?.Invoke(sample);
-            }
-            catch (ProtocolException exception)
-            {
-                DiagnosticMessage?.Invoke(exception.Message);
-            }
-
+            HandleTelemetryFrame(frame);
             return;
         }
 
-        if (_pendingResponses.TryGetValue(frame.Sequence, out var completion))
+        if (_pendingResponses.TryGetValue(
+                frame.Sequence,
+                out PendingRequest? pendingRequest) &&
+            (pendingRequest.Generation == generation))
         {
-            completion.TrySetResult(frame);
+            pendingRequest.Completion.TrySetResult(frame);
             return;
         }
 
-        DiagnosticMessage?.Invoke(
+        PublishDiagnostic(
             $"Unmatched RX {frame.MessageType} seq={frame.Sequence}.");
+    }
+
+    private void HandleTelemetryFrame(ProtocolFrame frame)
+    {
+        try
+        {
+            TelemetrySample sample = PayloadCodec.DecodeTelemetry(
+                frame.Payload.Span,
+                _timeProvider.GetUtcNow());
+            UpdateLossCount(sample.SampleCounter);
+            PublishTelemetry(sample);
+        }
+        catch (ProtocolException exception)
+        {
+            PublishDiagnostic(exception.Message);
+        }
     }
 
     private void UpdateLossCount(uint sampleCounter)
@@ -376,8 +449,10 @@ public sealed class DeviceSession : IAsyncDisposable
         {
             uint expected = unchecked(_lastSampleCounter.Value + 1U);
             uint difference = unchecked(sampleCounter - expected);
+            const uint MaximumForwardDifference = 0x7FFFFFFF;
 
-            if ((difference > 0U) && (difference < 0x80000000U))
+            if ((difference > 0U) &&
+                (difference <= MaximumForwardDifference))
             {
                 Interlocked.Add(ref _lostSampleCount, difference);
             }
@@ -395,30 +470,54 @@ public sealed class DeviceSession : IAsyncDisposable
         }
 
         SetState(DeviceSessionState.Disconnecting);
+        long retiredGeneration = ConnectionGeneration;
 
         _receiveCancellation?.Cancel();
+        CancelPendingRequests(retiredGeneration);
 
-        foreach (TaskCompletionSource<ProtocolFrame> completion in
-                 _pendingResponses.Values)
-        {
-            completion.TrySetCanceled();
-        }
-
-        _pendingResponses.Clear();
-
+        Exception? transportFailure = null;
         if (_transport.IsConnected)
-        {
-            await _transport.DisconnectAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        if (_receiveTask is not null)
         {
             try
             {
-                await _receiveTask.ConfigureAwait(false);
+                await _transport.DisconnectAsync(cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
             {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                transportFailure = exception;
+                PublishDiagnostic(
+                    $"Transport disconnect failed: {exception.Message}");
+            }
+        }
+
+        Task? receiveTask = _receiveTask;
+        if (receiveTask is not null)
+        {
+            try
+            {
+                await receiveTask
+                    .WaitAsync(
+                        _options.ReceiveLoopShutdownTimeout,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+                when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (TimeoutException exception)
+            {
+                SetState(DeviceSessionState.Faulted);
+                throw new TimeoutException(
+                    "Receive loop did not stop within the configured bound.",
+                    exception);
             }
         }
 
@@ -427,21 +526,113 @@ public sealed class DeviceSession : IAsyncDisposable
         _receiveTask = null;
         DeviceInfo = null;
         _lastSampleCounter = null;
+
+        if (transportFailure is not null)
+        {
+            SetState(DeviceSessionState.Faulted);
+            throw new InvalidOperationException(
+                "Transport disconnect did not complete cleanly.",
+                transportFailure);
+        }
+
         SetState(DeviceSessionState.Disconnected);
-        DiagnosticMessage?.Invoke("Disconnected.");
+        PublishDiagnostic("Disconnected.");
+    }
+
+    private static void ValidateResponse(
+        MessageType requestType,
+        ProtocolFrame response,
+        MessageType[] validResponseTypes)
+    {
+        if (response.MessageType == MessageType.Nack)
+        {
+            (MessageType rejectedRequest, ResultCode resultCode) =
+                PayloadCodec.DecodeAck(response.Payload.Span);
+            throw new DeviceCommandException(
+                rejectedRequest,
+                resultCode,
+                $"Device rejected {rejectedRequest}: {resultCode}.");
+        }
+
+        bool isExpectedResponse = false;
+        foreach (MessageType validResponseType in validResponseTypes)
+        {
+            if (response.MessageType == validResponseType)
+            {
+                isExpectedResponse = true;
+                break;
+            }
+        }
+
+        if (!isExpectedResponse)
+        {
+            throw new ProtocolException(
+                $"Unexpected response {response.MessageType} for {requestType}.");
+        }
+
+        if (response.MessageType == MessageType.Ack)
+        {
+            (MessageType acknowledgedRequest, ResultCode resultCode) =
+                PayloadCodec.DecodeAck(response.Payload.Span);
+
+            if ((acknowledgedRequest != requestType) ||
+                (resultCode != ResultCode.Ok))
+            {
+                throw new ProtocolException(
+                    $"ACK does not match request {requestType}.");
+            }
+        }
+    }
+
+    private void CancelPendingRequests(long generation)
+    {
+        foreach (PendingRequest pendingRequest in _pendingResponses.Values)
+        {
+            if (pendingRequest.Generation == generation)
+            {
+                pendingRequest.Completion.TrySetCanceled();
+            }
+        }
+
+        _pendingResponses.Clear();
+    }
+
+    private void FailPendingRequests(long generation, Exception exception)
+    {
+        foreach (PendingRequest pendingRequest in _pendingResponses.Values)
+        {
+            if (pendingRequest.Generation == generation)
+            {
+                pendingRequest.Completion.TrySetException(exception);
+            }
+        }
     }
 
     private ushort NextSequence()
     {
-        while (true)
+        for (int attempt = 0; attempt < ushort.MaxValue; attempt++)
         {
             int value = Interlocked.Increment(ref _sequenceValue);
             ushort sequence = unchecked((ushort)value);
 
-            if (sequence != 0)
+            if ((sequence != 0) && !_pendingResponses.ContainsKey(sequence))
             {
                 return sequence;
             }
+        }
+
+        throw new InvalidOperationException("No command sequence is available.");
+    }
+
+    private static void ValidateStreamInterval(ushort intervalUs)
+    {
+        if ((intervalUs < ProtocolConstants.MinimumStreamIntervalUs) ||
+            (intervalUs > ProtocolConstants.MaximumStreamIntervalUs))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(intervalUs),
+                intervalUs,
+                "Stream interval is outside the Project Protocol range.");
         }
     }
 
@@ -457,11 +648,79 @@ public sealed class DeviceSession : IAsyncDisposable
     private void SetState(DeviceSessionState state)
     {
         DeviceSessionState previous =
-            (DeviceSessionState)Interlocked.Exchange(ref _stateValue, (int)state);
+            (DeviceSessionState)Interlocked.Exchange(
+                ref _stateValue,
+                (int)state);
 
         if (previous != state)
         {
-            StateChanged?.Invoke(state);
+            PublishStateChanged(state);
+        }
+    }
+
+    private void PublishStateChanged(DeviceSessionState state)
+    {
+        Action<DeviceSessionState>? handlers = StateChanged;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<DeviceSessionState>)subscriber)(state);
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine(exception);
+            }
+        }
+    }
+
+    private void PublishTelemetry(TelemetrySample sample)
+    {
+        Action<TelemetrySample>? handlers = TelemetryReceived;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<TelemetrySample>)subscriber)(sample);
+            }
+            catch (Exception exception)
+            {
+                PublishDiagnostic(
+                    $"Telemetry subscriber failed: {exception.Message}");
+            }
+        }
+    }
+
+    private void PublishDiagnostic(string message)
+    {
+        string sanitizedMessage = DiagnosticText.Sanitize(message);
+        Action<string>? handlers = DiagnosticMessage;
+        if (handlers is null)
+        {
+            Debug.WriteLine(sanitizedMessage);
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<string>)subscriber)(sanitizedMessage);
+            }
+            catch (Exception exception)
+            {
+                Debug.WriteLine(exception);
+            }
         }
     }
 
@@ -470,6 +729,10 @@ public sealed class DeviceSession : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
+    /// <summary>
+    /// Performs deterministic asynchronous shutdown and releases the owned
+    /// transport and lifecycle gate.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -482,4 +745,8 @@ public sealed class DeviceSession : IAsyncDisposable
         _lifecycleGate.Dispose();
         _disposed = true;
     }
+
+    private sealed record PendingRequest(
+        long Generation,
+        TaskCompletionSource<ProtocolFrame> Completion);
 }

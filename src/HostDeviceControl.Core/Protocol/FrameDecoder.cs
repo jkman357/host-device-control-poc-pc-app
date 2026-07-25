@@ -1,19 +1,40 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
 using System.Buffers.Binary;
+using System.Threading;
 
 namespace HostDeviceControl.Core.Protocol;
 
+/// <summary>
+/// Incrementally decodes a bounded byte stream and resynchronizes after noise,
+/// malformed length fields, unknown identifiers, and CRC failures.
+/// </summary>
 public sealed class FrameDecoder
 {
-    private byte[] _buffer = new byte[4096];
+    private const int InitialBufferSizeBytes = 4096;
+
+    private byte[] _buffer = new byte[InitialBufferSizeBytes];
     private int _count;
+    private long _crcErrorCount;
+    private long _formatErrorCount;
+    private long _unknownMessageTypeCount;
+    private long _discardedByteCount;
 
-    public long CrcErrorCount { get; private set; }
+    public long CrcErrorCount => Interlocked.Read(ref _crcErrorCount);
 
-    public long FormatErrorCount { get; private set; }
+    public long FormatErrorCount => Interlocked.Read(ref _formatErrorCount);
 
-    public long DiscardedByteCount { get; private set; }
+    public long UnknownMessageTypeCount =>
+        Interlocked.Read(ref _unknownMessageTypeCount);
 
+    public long DiscardedByteCount =>
+        Interlocked.Read(ref _discardedByteCount);
+
+    /// <summary>
+    /// Appends transport bytes while preserving the protocol-wide memory bound.
+    /// </summary>
     public void Append(ReadOnlySpan<byte> data)
     {
         if (data.IsEmpty)
@@ -24,17 +45,19 @@ public sealed class FrameDecoder
         if (data.Length > ProtocolConstants.MaximumBufferedBytes)
         {
             data = data.Slice(data.Length - ProtocolConstants.MaximumBufferedBytes);
+            Interlocked.Add(ref _discardedByteCount, _count);
             _count = 0;
-            FormatErrorCount++;
+            Interlocked.Increment(ref _formatErrorCount);
         }
 
-        int requiredLength = _count + data.Length;
+        int requiredLength = checked(_count + data.Length);
         if (requiredLength > ProtocolConstants.MaximumBufferedBytes)
         {
-            int bytesToDiscard = requiredLength - ProtocolConstants.MaximumBufferedBytes;
+            int bytesToDiscard =
+                requiredLength - ProtocolConstants.MaximumBufferedBytes;
             Discard(bytesToDiscard);
-            FormatErrorCount++;
-            requiredLength = _count + data.Length;
+            Interlocked.Increment(ref _formatErrorCount);
+            requiredLength = checked(_count + data.Length);
         }
 
         EnsureCapacity(requiredLength);
@@ -42,6 +65,9 @@ public sealed class FrameDecoder
         _count += data.Length;
     }
 
+    /// <summary>
+    /// Attempts to decode one complete validated frame.
+    /// </summary>
     public bool TryRead(out ProtocolFrame? frame)
     {
         frame = null;
@@ -66,11 +92,13 @@ public sealed class FrameDecoder
             }
 
             ushort payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(
-                _buffer.AsSpan(6, 2));
+                _buffer.AsSpan(
+                    ProtocolConstants.PayloadLengthOffset,
+                    sizeof(ushort)));
 
             if (payloadLength > ProtocolConstants.MaximumPayloadSize)
             {
-                FormatErrorCount++;
+                Interlocked.Increment(ref _formatErrorCount);
                 Discard(1);
                 continue;
             }
@@ -84,22 +112,37 @@ public sealed class FrameDecoder
             int crcInputLength =
                 ProtocolConstants.HeaderWithoutSofSize + payloadLength;
             ushort expectedCrc = Crc16Ccitt.Compute(
-                _buffer.AsSpan(2, crcInputLength));
+                _buffer.AsSpan(
+                    ProtocolConstants.VersionOffset,
+                    crcInputLength));
             ushort receivedCrc = BinaryPrimitives.ReadUInt16LittleEndian(
-                _buffer.AsSpan(totalLength - ProtocolConstants.CrcSize, 2));
+                _buffer.AsSpan(
+                    totalLength - ProtocolConstants.CrcSize,
+                    ProtocolConstants.CrcSize));
 
             if (expectedCrc != receivedCrc)
             {
-                CrcErrorCount++;
+                Interlocked.Increment(ref _crcErrorCount);
                 Discard(1);
                 continue;
             }
 
-            byte version = _buffer[2];
-            MessageType messageType = (MessageType)_buffer[3];
+            byte rawMessageType = _buffer[ProtocolConstants.MessageTypeOffset];
+            if (!MessageTypeValidator.IsDefined(rawMessageType))
+            {
+                Interlocked.Increment(ref _unknownMessageTypeCount);
+                Interlocked.Increment(ref _formatErrorCount);
+                Discard(totalLength, countAsDiscarded: false);
+                continue;
+            }
+
+            byte version = _buffer[ProtocolConstants.VersionOffset];
+            var messageType = (MessageType)rawMessageType;
             ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(
-                _buffer.AsSpan(4, 2));
-            byte[] payload = _buffer.AsSpan(8, payloadLength).ToArray();
+                _buffer.AsSpan(ProtocolConstants.SequenceOffset, sizeof(ushort)));
+            byte[] payload = _buffer
+                .AsSpan(ProtocolConstants.PayloadOffset, payloadLength)
+                .ToArray();
 
             frame = new ProtocolFrame(version, messageType, sequence, payload);
             Discard(totalLength, countAsDiscarded: false);
@@ -126,14 +169,14 @@ public sealed class FrameDecoder
         if ((_count > 0) &&
             (_buffer[_count - 1] == ProtocolConstants.StartOfFrame0))
         {
-            int discarded = _count - 1;
+            int discardedByteCount = _count - 1;
             _buffer[0] = ProtocolConstants.StartOfFrame0;
             _count = 1;
-            DiscardedByteCount += discarded;
+            Interlocked.Add(ref _discardedByteCount, discardedByteCount);
         }
         else
         {
-            DiscardedByteCount += _count;
+            Interlocked.Add(ref _discardedByteCount, _count);
             _count = 0;
         }
     }
@@ -148,7 +191,7 @@ public sealed class FrameDecoder
         int newLength = _buffer.Length;
         while (newLength < requiredLength)
         {
-            newLength *= 2;
+            newLength = checked(newLength * 2);
         }
 
         newLength = Math.Min(newLength, ProtocolConstants.MaximumBufferedBytes);
@@ -166,7 +209,7 @@ public sealed class FrameDecoder
         {
             if (countAsDiscarded)
             {
-                DiscardedByteCount += _count;
+                Interlocked.Add(ref _discardedByteCount, _count);
             }
 
             _count = 0;
@@ -178,7 +221,7 @@ public sealed class FrameDecoder
 
         if (countAsDiscarded)
         {
-            DiscardedByteCount += count;
+            Interlocked.Add(ref _discardedByteCount, count);
         }
     }
 }

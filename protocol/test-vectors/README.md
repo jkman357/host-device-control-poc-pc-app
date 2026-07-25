@@ -1,3 +1,5 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
+
 # Protocol Test Vectors
 
 `protocol-v0.1.0-vectors.json` contains complete frames encoded according to

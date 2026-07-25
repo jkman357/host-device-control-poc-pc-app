@@ -1,3 +1,6 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
 using System.Collections.Generic;
 using System.Windows;
@@ -5,8 +8,32 @@ using System.Windows.Media;
 
 namespace HostDeviceControl.App.Controls;
 
+/// <summary>
+/// Renders a bounded snapshot of telemetry samples without owning acquisition
+/// or transport work.
+/// </summary>
 public sealed class WaveformControl : FrameworkElement
 {
+    private const int VerticalGridDivisions = 10;
+    private const int HorizontalGridDivisions = 8;
+    private const double GridLineThickness = 1.0;
+    private const double WaveformLineThickness = 1.5;
+
+    private static readonly Brush BackgroundBrush;
+    private static readonly Pen GridPen;
+    private static readonly Pen WaveformPen;
+
+    static WaveformControl()
+    {
+        BackgroundBrush = CreateFrozenBrush(Color.FromRgb(16, 24, 32));
+        GridPen = CreateFrozenPen(
+            Color.FromArgb(70, 180, 190, 200),
+            GridLineThickness);
+        WaveformPen = CreateFrozenPen(
+            Color.FromRgb(64, 220, 160),
+            WaveformLineThickness);
+    }
+
     public static readonly DependencyProperty SamplesProperty =
         DependencyProperty.Register(
             nameof(Samples),
@@ -34,18 +61,27 @@ public sealed class WaveformControl : FrameworkElement
                 1.0,
                 FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>
+    /// Gets or sets the immutable sample snapshot rendered on the UI thread.
+    /// </summary>
     public IReadOnlyList<double> Samples
     {
         get => (IReadOnlyList<double>)GetValue(SamplesProperty);
         set => SetValue(SamplesProperty, value);
     }
 
+    /// <summary>
+    /// Gets or sets the lower display bound.
+    /// </summary>
     public double MinimumValue
     {
         get => (double)GetValue(MinimumValueProperty);
         set => SetValue(MinimumValueProperty, value);
     }
 
+    /// <summary>
+    /// Gets or sets the upper display bound.
+    /// </summary>
     public double MaximumValue
     {
         get => (double)GetValue(MaximumValueProperty);
@@ -57,35 +93,29 @@ public sealed class WaveformControl : FrameworkElement
         base.OnRender(drawingContext);
 
         Rect bounds = new(0, 0, ActualWidth, ActualHeight);
-        drawingContext.DrawRectangle(
-            new SolidColorBrush(Color.FromRgb(16, 24, 32)),
-            null,
-            bounds);
-
+        drawingContext.DrawRectangle(BackgroundBrush, null, bounds);
         DrawGrid(drawingContext, bounds);
         DrawWaveform(drawingContext, bounds);
     }
 
     private static void DrawGrid(DrawingContext drawingContext, Rect bounds)
     {
-        var gridPen = new Pen(
-            new SolidColorBrush(Color.FromArgb(70, 180, 190, 200)),
-            1.0);
-        gridPen.Freeze();
-
-        const int verticalDivisions = 10;
-        const int horizontalDivisions = 8;
-
-        for (int index = 1; index < verticalDivisions; index++)
+        for (int index = 1; index < VerticalGridDivisions; index++)
         {
-            double x = bounds.Width * index / verticalDivisions;
-            drawingContext.DrawLine(gridPen, new Point(x, 0), new Point(x, bounds.Height));
+            double x = bounds.Width * index / VerticalGridDivisions;
+            drawingContext.DrawLine(
+                GridPen,
+                new Point(x, 0),
+                new Point(x, bounds.Height));
         }
 
-        for (int index = 1; index < horizontalDivisions; index++)
+        for (int index = 1; index < HorizontalGridDivisions; index++)
         {
-            double y = bounds.Height * index / horizontalDivisions;
-            drawingContext.DrawLine(gridPen, new Point(0, y), new Point(bounds.Width, y));
+            double y = bounds.Height * index / HorizontalGridDivisions;
+            drawingContext.DrawLine(
+                GridPen,
+                new Point(0, y),
+                new Point(bounds.Width, y));
         }
     }
 
@@ -99,11 +129,6 @@ public sealed class WaveformControl : FrameworkElement
         {
             return;
         }
-
-        var linePen = new Pen(
-            new SolidColorBrush(Color.FromRgb(64, 220, 160)),
-            1.5);
-        linePen.Freeze();
 
         var geometry = new StreamGeometry();
         using (StreamGeometryContext context = geometry.Open())
@@ -120,7 +145,7 @@ public sealed class WaveformControl : FrameworkElement
         }
 
         geometry.Freeze();
-        drawingContext.DrawGeometry(null, linePen, geometry);
+        drawingContext.DrawGeometry(null, WaveformPen, geometry);
     }
 
     private double ConvertY(double value, double height)
@@ -129,5 +154,19 @@ public sealed class WaveformControl : FrameworkElement
         double normalized =
             (clamped - MinimumValue) / (MaximumValue - MinimumValue);
         return height - (normalized * height);
+    }
+
+    private static Brush CreateFrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
+    }
+
+    private static Pen CreateFrozenPen(Color color, double thickness)
+    {
+        var pen = new Pen(CreateFrozenBrush(color), thickness);
+        pen.Freeze();
+        return pen;
     }
 }

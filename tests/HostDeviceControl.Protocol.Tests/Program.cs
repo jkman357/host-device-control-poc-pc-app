@@ -1,9 +1,13 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using HostDeviceControl.Core.Concurrency;
 using HostDeviceControl.Core.Device;
 using HostDeviceControl.Core.Models;
 using HostDeviceControl.Core.Protocol;
@@ -13,21 +17,37 @@ namespace HostDeviceControl.Protocol.Tests;
 
 internal static class Program
 {
+    private const int TestCommandTimeoutMilliseconds = 60;
+    private const int TestStopTimeoutMilliseconds = 100;
+    private const int TestShutdownTimeoutMilliseconds = 250;
+    private const int TestCancellationMilliseconds = 60;
+    private const int TestReceiveBufferSizeBytes = 1024;
+
     private static readonly List<string> Failures = [];
 
     public static async Task<int> Main()
     {
+        PrintEvidenceHeader();
         Run("CRC standard vector", TestCrcStandardVector);
         Run("Frame round trip", TestFrameRoundTrip);
         Run("Known PING vector", TestKnownPingVector);
         Run("Fragmented frame", TestFragmentedFrame);
         Run("Noise resynchronization", TestNoiseResynchronization);
         Run("CRC rejection", TestCrcRejection);
-        await RunAsync("Fake device session", TestFakeDeviceSessionAsync);
+        Run("Unknown message rejection", TestUnknownMessageRejection);
+        Run("Malformed ACK rejection", TestMalformedAckRejection);
+        Run("Non-finite telemetry rejection", TestNonFiniteTelemetryRejection);
+        Run("Bounded UI buffer policy", TestBoundedDropOldestBuffer);
+        await RunAsync("Fake device happy path", TestFakeDeviceSessionAsync);
+        await RunAsync("Fake CRC fault injection", TestFakeCrcFaultAsync);
+        await RunAsync("Fake sample-loss injection", TestFakeSampleLossAsync);
+        await RunAsync("Command timeout", TestCommandTimeoutAsync);
+        await RunAsync("Command cancellation", TestCommandCancellationAsync);
 
         if (Failures.Count == 0)
         {
-            Console.WriteLine("All protocol tests passed.");
+            Console.WriteLine();
+            Console.WriteLine("All engineering protocol tests passed.");
             return 0;
         }
 
@@ -39,6 +59,21 @@ internal static class Program
         }
 
         return 1;
+    }
+
+    private static void PrintEvidenceHeader()
+    {
+        Console.WriteLine("HostDeviceControl engineering test evidence");
+        Console.WriteLine("Software candidate: 0.2.0");
+        Console.WriteLine("Repository base: 84bbc16f02a864084b1270db40b58460ad691e35");
+        Console.WriteLine("Protocol: protocol.yaml v0.1.0");
+        Console.WriteLine($"Runtime: {Environment.Version}");
+        Console.WriteLine($"OS: {Environment.OSVersion}");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.2.0");
+        Console.WriteLine(
+            "Evidence scope: software protocol/concurrency behavior only; " +
+            "not physical hardware validation.");
+        Console.WriteLine();
     }
 
     private static void TestCrcStandardVector()
@@ -63,7 +98,7 @@ internal static class Program
         AssertEqual(expected.Version, actual!.Version);
         AssertEqual(expected.MessageType, actual.MessageType);
         AssertEqual(expected.Sequence, actual.Sequence);
-        AssertSequenceEqual(expected.Payload, actual.Payload);
+        AssertSpanEqual(expected.Payload.Span, actual.Payload.Span);
     }
 
     private static void TestKnownPingVector()
@@ -123,7 +158,7 @@ internal static class Program
                 MessageType.Ping,
                 10,
                 []));
-        corrupted[3] ^= 0x01;
+        corrupted[^1] ^= 0x01;
 
         var decoder = new FrameDecoder();
         decoder.Append(corrupted);
@@ -131,38 +166,185 @@ internal static class Program
         AssertEqual(1L, decoder.CrcErrorCount);
     }
 
+    private static void TestUnknownMessageRejection()
+    {
+        byte[] encoded = FrameEncoder.Encode(
+            new ProtocolFrame(
+                ProtocolConstants.WireVersion,
+                MessageType.Ping,
+                11,
+                []));
+        encoded[ProtocolConstants.MessageTypeOffset] = 0x7F;
+        RewriteCrc(encoded);
+
+        var decoder = new FrameDecoder();
+        decoder.Append(encoded);
+        AssertFalse(decoder.TryRead(out _));
+        AssertEqual(1L, decoder.UnknownMessageTypeCount);
+    }
+
+    private static void TestMalformedAckRejection()
+    {
+        AssertThrows<ProtocolException>(
+            () => PayloadCodec.DecodeAck([0x7F, 0x00]));
+        AssertThrows<ProtocolException>(
+            () => PayloadCodec.DecodeAck([(byte)MessageType.Ping, 0x7F]));
+    }
+
+    private static void TestNonFiniteTelemetryRejection()
+    {
+        byte[] payload = new byte[ProtocolConstants.TelemetryPayloadSize];
+        BinaryPrimitives.WriteInt32LittleEndian(
+            payload.AsSpan(8, sizeof(int)),
+            BitConverter.SingleToInt32Bits(float.NaN));
+        AssertThrows<ProtocolException>(
+            () => PayloadCodec.DecodeTelemetry(payload, DateTimeOffset.UtcNow));
+    }
+
+    private static void TestBoundedDropOldestBuffer()
+    {
+        var buffer = new BoundedDropOldestBuffer<int>(3);
+        buffer.Enqueue(1);
+        buffer.Enqueue(2);
+        buffer.Enqueue(3);
+        AssertTrue(buffer.Enqueue(4));
+
+        var values = new List<int>();
+        AssertEqual(3, buffer.DrainTo(values, 10));
+        AssertEqual(1L, buffer.DroppedItemCount);
+        AssertSpanEqual<int>([2, 3, 4], values.ToArray());
+    }
+
     private static async Task TestFakeDeviceSessionAsync()
     {
         await using var transport = new FakeDeviceTransport();
         await using var session = new DeviceSession(transport);
+        await CollectSamplesAsync(session, 10);
+        AssertEqual(0L, session.CrcErrorCount);
+        AssertEqual(0L, session.LostSampleCount);
+    }
+
+    private static async Task TestFakeCrcFaultAsync()
+    {
+        var options = new FakeDeviceTransportOptions
+        {
+            CorruptEveryNthTelemetryFrame = 3
+        };
+        await using var transport = new FakeDeviceTransport(options);
+        await using var session = new DeviceSession(transport);
+        await CollectSamplesAsync(session, 10);
+        AssertTrue(session.CrcErrorCount > 0);
+    }
+
+    private static async Task TestFakeSampleLossAsync()
+    {
+        var options = new FakeDeviceTransportOptions
+        {
+            DropEveryNthTelemetrySample = 4
+        };
+        await using var transport = new FakeDeviceTransport(options);
+        await using var session = new DeviceSession(transport);
+        await CollectSamplesAsync(session, 12);
+        AssertTrue(session.LostSampleCount > 0);
+    }
+
+    private static async Task TestCommandTimeoutAsync()
+    {
+        var transportOptions = new FakeDeviceTransportOptions
+        {
+            SuppressCommandResponses = true
+        };
+        var sessionOptions = new DeviceSessionOptions
+        {
+            CommandTimeout = TimeSpan.FromMilliseconds(TestCommandTimeoutMilliseconds),
+            StopStreamTimeout = TimeSpan.FromMilliseconds(TestStopTimeoutMilliseconds),
+            ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(TestShutdownTimeoutMilliseconds),
+            ReceiveBufferSizeBytes = TestReceiveBufferSizeBytes
+        };
+
+        await using var transport = new FakeDeviceTransport(transportOptions);
+        await using var session = new DeviceSession(transport, sessionOptions);
+        await AssertThrowsAsync<TimeoutException>(
+            () => session.ConnectAsync(CancellationToken.None));
+        AssertEqual(DeviceSessionState.Disconnected, session.State);
+    }
+
+    private static async Task TestCommandCancellationAsync()
+    {
+        var transportOptions = new FakeDeviceTransportOptions
+        {
+            SuppressCommandResponses = true
+        };
+        var sessionOptions = new DeviceSessionOptions
+        {
+            CommandTimeout = TimeSpan.FromSeconds(2),
+            StopStreamTimeout = TimeSpan.FromMilliseconds(TestStopTimeoutMilliseconds),
+            ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(TestShutdownTimeoutMilliseconds),
+            ReceiveBufferSizeBytes = TestReceiveBufferSizeBytes
+        };
+
+        await using var transport = new FakeDeviceTransport(transportOptions);
+        await using var session = new DeviceSession(transport, sessionOptions);
+        using var cancellation = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+        await AssertThrowsAsync<OperationCanceledException>(
+            () => session.ConnectAsync(cancellation.Token));
+        AssertEqual(DeviceSessionState.Disconnected, session.State);
+    }
+
+    private static async Task CollectSamplesAsync(
+        DeviceSession session,
+        int requiredSampleCount)
+    {
         int sampleCount = 0;
-        var sampleCompletion = new TaskCompletionSource<bool>(
+        var completion = new TaskCompletionSource<bool>(
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         session.TelemetryReceived += OnTelemetry;
+        try
+        {
+            await session.ConnectAsync(CancellationToken.None);
+            AssertEqual(DeviceSessionState.Ready, session.State);
+            AssertNotNull(session.DeviceInfo);
+
+            await session.StartStreamingAsync(
+                ProtocolConstants.DefaultStreamIntervalUs,
+                CancellationToken.None);
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            AssertEqual(DeviceSessionState.Streaming, session.State);
+            AssertTrue(sampleCount >= requiredSampleCount);
+
+            await session.StopStreamingAsync(CancellationToken.None);
+            AssertEqual(DeviceSessionState.Ready, session.State);
+            await session.DisconnectAsync(CancellationToken.None);
+            AssertEqual(DeviceSessionState.Disconnected, session.State);
+        }
+        finally
+        {
+            session.TelemetryReceived -= OnTelemetry;
+        }
 
         void OnTelemetry(TelemetrySample sample)
         {
             int current = Interlocked.Increment(ref sampleCount);
-            if (current >= 10)
+            if (current >= requiredSampleCount)
             {
-                sampleCompletion.TrySetResult(true);
+                completion.TrySetResult(true);
             }
         }
+    }
 
-        await session.ConnectAsync(CancellationToken.None);
-        AssertEqual(DeviceSessionState.Ready, session.State);
-        AssertNotNull(session.DeviceInfo);
-
-        await session.StartStreamingAsync(5000, CancellationToken.None);
-        await sampleCompletion.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        AssertEqual(DeviceSessionState.Streaming, session.State);
-        AssertTrue(sampleCount >= 10);
-
-        await session.StopStreamingAsync(CancellationToken.None);
-        AssertEqual(DeviceSessionState.Ready, session.State);
-        await session.DisconnectAsync(CancellationToken.None);
-        AssertEqual(DeviceSessionState.Disconnected, session.State);
+    private static void RewriteCrc(byte[] frame)
+    {
+        int payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(
+            frame.AsSpan(ProtocolConstants.PayloadLengthOffset, sizeof(ushort)));
+        int crcInputLength =
+            ProtocolConstants.HeaderWithoutSofSize + payloadLength;
+        ushort crc = Crc16Ccitt.Compute(
+            frame.AsSpan(ProtocolConstants.VersionOffset, crcInputLength));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            frame.AsSpan(frame.Length - ProtocolConstants.CrcSize),
+            crc);
     }
 
     private static void Run(string name, Action test)
@@ -226,13 +408,46 @@ internal static class Program
         }
     }
 
-    private static void AssertSequenceEqual<T>(
-        IEnumerable<T> expected,
-        IEnumerable<T> actual)
+    private static void AssertSpanEqual<T>(
+        ReadOnlySpan<T> expected,
+        ReadOnlySpan<T> actual)
+        where T : IEquatable<T>
     {
         if (!expected.SequenceEqual(actual))
         {
             throw new InvalidOperationException("Sequences are not equal.");
         }
+    }
+
+    private static void AssertThrows<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Expected {typeof(TException).Name}.");
+    }
+
+    private static async Task AssertThrowsAsync<TException>(Func<Task> action)
+        where TException : Exception
+    {
+        try
+        {
+            await action();
+        }
+        catch (TException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Expected {typeof(TException).Name}.");
     }
 }

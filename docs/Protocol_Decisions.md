@@ -1,3 +1,5 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
+
 # Protocol Decisions
 
 ## Contract-first development

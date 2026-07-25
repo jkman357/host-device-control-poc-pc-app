@@ -1,3 +1,4 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>

@@ -1,9 +1,15 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
 namespace HostDeviceControl.App.Infrastructure;
 
+/// <summary>
+/// Provides minimal property-change notification for presentation state.
+/// </summary>
 public abstract class ObservableObject : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;

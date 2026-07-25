@@ -1,5 +1,11 @@
+// Copyright © 2026 Ray Yang. All rights reserved.
+// No license is granted. See LICENSE and NOTICE.md.
+
 namespace HostDeviceControl.Core.Protocol;
 
+/// <summary>
+/// Result-code values derived from <c>protocol/protocol.yaml</c> v0.1.0.
+/// </summary>
 public enum ResultCode : byte
 {
     Ok = 0x00,

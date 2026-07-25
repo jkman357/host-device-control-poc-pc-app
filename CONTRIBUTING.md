@@ -1,16 +1,16 @@
 # Contributing
 
-This repository is not offered under an open-source license. Contributions may
-be accepted only by explicit arrangement with the copyright holder.
+Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
-For internal engineering changes:
+No public contribution license is granted. Proposed changes may be reviewed at the repository owner's discretion.
 
-1. update `protocol/protocol.yaml` before changing an externally visible frame;
-2. update cross-language test vectors;
-3. update both PC and MCU implementations;
-4. run the protocol self-test;
-5. record the change in `CHANGELOG.md`;
-6. preserve transport, protocol, session, and UI responsibility boundaries.
+Any accepted change must:
 
-A protocol change is incomplete until both directions, error behavior, version
-compatibility, and test evidence are defined.
+1. preserve the authority and precedence recorded in `authority-registry.yaml`;
+2. update `protocol/protocol.yaml` before changing wire behavior;
+3. keep continuous work bounded and document overflow, cancellation, timeout, and ownership;
+4. avoid blocking or device/protocol work on the WPF UI thread;
+5. update tests and fault injection for changed behavior;
+6. record justified deviations in `docs/Project_Profile.md`;
+7. run `./scripts/validate.ps1`, `./scripts/build.ps1`, and `./scripts/test.ps1`;
+8. retain human review as the final approval boundary.

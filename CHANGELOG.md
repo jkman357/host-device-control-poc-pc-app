@@ -1,27 +1,21 @@
 # Changelog
 
-## 0.1.2 - 2026-07-25
+Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
-- fix the WPF startup exception caused by a default TwoWay binding to read-only ViewModel status properties;
-- explicitly mark all display-only status, counter, waveform, and log bindings as `Mode=OneWay`;
-- document the binding rule in the README.
+## 0.2.0 — Engineering-rules-aligned candidate
 
-## 0.1.1 - 2026-07-25
+- Explicitly adopted the five pinned Coordinator/C# engineering authorities.
+- Added Project profile, deviations, concurrency model, UI profile, testing strategy, simulator profile, and conformance assessment.
+- Replaced unbounded UI telemetry accumulation with a bounded drop-oldest buffer and visible drop count.
+- Added bounded request correlation, generation ownership, cancellation, shutdown timeouts, and safer background-task ownership.
+- Added external message/result validation, strict UTF-8, finite telemetry validation, and bounded decoder behavior.
+- Added recorder-overrun reporting and bounded CSV writer work.
+- Added fake-device CRC, sample-loss, timeout, and cancellation fault injection.
+- Added expanded executable tests and protocol-contract/static repository validators.
+- Added application and framework event exception boundaries.
+- Added source-file copyright headers and assembly copyright metadata.
 
-- make `HostDeviceControl.App` the first project in the solution so a fresh Visual Studio workspace defaults to the executable project;
-- add a shared `.slnLaunch` profile for `HostDeviceControl.App`;
-- document how to correct the startup project when Visual Studio selects a class library.
+## 0.1.2 — PoC baseline
 
-## 0.1.0 - 2026-07-25
-
-Initial PoC baseline:
-
-- WPF desktop application;
-- fake-device and serial transports;
-- binary framing and CRC implementation;
-- device-session state machine;
-- handshake, stream configuration, start, and stop commands;
-- 200 Hz sine-wave telemetry;
-- live waveform and CSV recording;
-- protocol test vectors and executable self-tests;
-- Windows CI workflow.
+- Corrected WPF display bindings to use explicit one-way mode.
+- Retained Fake and Serial transport paths, telemetry chart, and recording.

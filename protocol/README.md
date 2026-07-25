@@ -1,3 +1,5 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
+
 # Shared PC/MCU Protocol Contract
 
 `protocol.yaml` is the authoritative wire-level contract for both repositories:

@@ -1,49 +1,46 @@
-# PC/MCU Bring-up Checklist
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
 
-## Before connecting hardware
+# Physical Bring-up and UI Review Checklist
 
-- [ ] PC protocol self-test passes.
-- [ ] MCU CRC function passes the `123456789 -> 0x29B1` vector.
-- [ ] MCU encoder output matches `protocol/test-vectors` byte for byte.
-- [ ] Both sides use little-endian fields.
-- [ ] Both sides use protocol version `0x01`.
-- [ ] UART is configured for 115200, 8 data bits, no parity, 1 stop bit.
+## Controlled build identity
 
-## First connection
+- [ ] Record repository commit and dirty/clean state.
+- [ ] Record .NET SDK, Visual Studio, Windows, and `System.IO.Ports` package versions.
+- [ ] Run `scripts/validate.ps1`, `scripts/build.ps1`, and `scripts/test.ps1` and retain output.
+- [ ] Review all compiler/analyzer warnings.
+- [ ] Generate/review the NuGet lock file when first establishing the controlled baseline.
 
-- [ ] Open the COM port without starting telemetry.
-- [ ] Send `GET_DEVICE_INFO`.
-- [ ] Confirm response sequence equals request sequence.
-- [ ] Confirm device type and firmware version decode correctly.
-- [ ] Confirm no CRC or parser errors.
+## WPF behavior
 
-## Streaming
+- [ ] `HostDeviceControl.App` is the startup project and launches without binding exceptions.
+- [ ] Transport, COM port, and baud controls are disabled while connected.
+- [ ] Button enablement follows Disconnected/Ready/Streaming states.
+- [ ] Error text is visible without relying only on color.
+- [ ] Operational log remains responsive and bounded during a sustained stream.
+- [ ] UI queue/drop and recorder-drop counters remain visible.
+- [ ] Closing during Ready, Streaming, and Recording performs orderly bounded shutdown.
+- [ ] Keyboard focus and accessible names are manually inspected.
 
-- [ ] Send `SET_STREAM_CONFIG` with 5000 microseconds.
-- [ ] Receive ACK.
-- [ ] Send `START_STREAM`.
-- [ ] Receive ACK before or at the defined start boundary.
-- [ ] Confirm sample counter increments by one.
-- [ ] Confirm device tick increments by approximately 5000 microseconds.
-- [ ] Confirm 200 samples/second over at least 10 minutes.
-- [ ] Confirm `STOP_STREAM` produces no further telemetry after the allowed drain.
+## Protocol cross-end validation
 
-## Error injection
+- [ ] MCU and PC both identify protocol v0.1.0 / wire version 0x01.
+- [ ] MCU implementation passes the shared frame vectors.
+- [ ] `GET_DEVICE_INFO`, `SET_STREAM_CONFIG`, `START_STREAM`, and `STOP_STREAM` sequences and payloads match.
+- [ ] CRC coverage, little-endian fields, payload limits, and strict lengths match.
+- [ ] Unknown IDs, malformed lengths, invalid state, and unsupported version behavior match the Project Protocol.
 
-- [ ] Corrupt one payload byte and confirm CRC rejection.
-- [ ] Split a frame across multiple UART reads.
-- [ ] concatenate multiple frames in one UART read.
-- [ ] Insert garbage bytes before SOF and confirm resynchronization.
-- [ ] Reset the MCU while connected and record expected host behavior.
-- [ ] Unplug USB during streaming and confirm the host exits to a faulted state.
+## Sustained physical transport
 
-## Evidence to retain
+- [ ] Record COM port, baud, board identity, firmware commit/version, and test duration.
+- [ ] Stream 200 Hz telemetry for the approved duration.
+- [ ] Record frame/sample counts, CRC errors, format errors, unknown IDs, lost samples, UI drops, and recorder drops.
+- [ ] Verify CSV monotonic sample counter/device tick and record any gaps.
+- [ ] Exercise USB disconnect while idle, streaming, and recording.
+- [ ] Reconnect with a new session generation and confirm no stale response is accepted.
+- [ ] Repeat start/stop cycles and application close cycles.
 
-- [ ] firmware commit;
-- [ ] PC application commit;
-- [ ] protocol version;
-- [ ] test date and operator;
-- [ ] COM port and baud rate;
-- [ ] captured raw frames or logic-analyzer evidence;
-- [ ] observed loss, CRC, and timeout counters;
-- [ ] known deviations and owner.
+## Evidence classification
+
+- [ ] Label Fake Device results as simulator evidence.
+- [ ] Label physical NUCLEO/VCP results as target integration evidence.
+- [ ] Do not claim safety, product, clinical, or regulatory validation from this PoC checklist.

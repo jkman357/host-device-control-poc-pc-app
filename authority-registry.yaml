@@ -1,34 +1,68 @@
-registry_version: 1
+# Copyright © 2026 Ray Yang. All rights reserved.
+# No license is granted. See LICENSE and NOTICE.md.
+
+registry_version: 2
 project: host-device-control-poc-pc-app
-status: poc_baseline
+candidate_version: 0.2.0
+status: engineering_rules_aligned_candidate
+implementation_base_commit: 84bbc16f02a864084b1270db40b58460ad691e35
+
+external_authority_source:
+  repository: host-device-control-framework
+  commit: 7a68980ef5faa2e897a3574af121683d65f74638
+  documents:
+    - canonical_filename: Coordinator_Software_Engineering_Rules.md
+      version: 1.1.0
+      status: Draft for Review
+      role: coordinator_minimum_rules
+    - canonical_filename: CSharp_Coding_Rules.md
+      version: 1.0.4
+      status: Draft for Review
+      role: csharp_implementation_rules
+    - canonical_filename: Coordinator_Concurrency_Guide.md
+      version: 1.1.0
+      status: Draft for Review
+      role: concurrency_topic_authority
+    - canonical_filename: Coordinator_UI_Engineering_Guide.md
+      version: 1.1.0
+      status: Draft for Review
+      role: ui_topic_authority
+    - canonical_filename: Coordinator_Testing_Guide.md
+      version: 1.1.0
+      status: Draft for Review
+      role: testing_topic_authority
 
 sources_of_truth:
   - path: protocol/protocol.yaml
-    authority: communication_contract
-    applies_to:
-      - pc_application
-      - stm32f446re_firmware
-
+    authority: project_communication_contract
+    applies_to: [pc_application, stm32f446re_firmware]
+  - path: docs/Engineering_Rules_Adoption.md
+    authority: project_authority_adoption
+    applies_to: [pc_application]
+  - path: docs/Project_Profile.md
+    authority: project_profile_and_deviations
+    applies_to: [pc_application]
   - path: docs/Architecture.md
     authority: pc_application_architecture
-    applies_to:
-      - pc_application
-
+    applies_to: [pc_application]
   - path: docs/Protocol_Decisions.md
     authority: protocol_decision_rationale
-    applies_to:
-      - pc_application
-      - stm32f446re_firmware
+    applies_to: [pc_application, stm32f446re_firmware]
 
 precedence:
   - protocol/protocol.yaml
+  - docs/Engineering_Rules_Adoption.md
+  - docs/Project_Profile.md
   - docs/Architecture.md
   - docs/Protocol_Decisions.md
   - README.md
 
 human_approval_required_for:
+  - authority_source_change
+  - deviation_change
   - protocol_version_change
   - message_id_change
   - payload_layout_change
   - crc_parameter_change
+  - release_conformance_claim
   - safety_or_product_reuse
