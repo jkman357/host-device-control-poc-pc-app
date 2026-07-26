@@ -85,18 +85,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.8");
+        Console.WriteLine("Software candidate: 0.3.9");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "446827e9103872bd7d809005999fb8eab065a0b6");
+            "ec83252f31a82a73b1f621378882361fd06fa941");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.8");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.9");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");

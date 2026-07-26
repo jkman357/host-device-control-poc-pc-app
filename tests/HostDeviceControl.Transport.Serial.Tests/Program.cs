@@ -42,14 +42,14 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl serial transport test evidence");
-        Console.WriteLine("Software candidate: 0.3.8");
+        Console.WriteLine("Software candidate: 0.3.9");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "446827e9103872bd7d809005999fb8eab065a0b6");
+            "ec83252f31a82a73b1f621378882361fd06fa941");
         Console.WriteLine(
             "Transport profile: pending system-authority proposal v1");
         Console.WriteLine($"Runtime: {Environment.Version}");
@@ -112,10 +112,6 @@ internal static class Program
         AssertEqual(Parity.None, SerialTransportOptions.RequiredParity);
         AssertEqual(StopBits.One, SerialTransportOptions.RequiredStopBits);
         AssertEqual(Handshake.None, SerialTransportOptions.RequiredHandshake);
-        AssertEqual(SerialTransportOptions.RequiredDataBits, options.DataBits);
-        AssertEqual(SerialTransportOptions.RequiredParity, options.Parity);
-        AssertEqual(SerialTransportOptions.RequiredStopBits, options.StopBits);
-        AssertEqual(SerialTransportOptions.RequiredHandshake, options.Handshake);
     }
 
     private static void TestStreamCapacityIntervals()

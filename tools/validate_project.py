@@ -34,8 +34,37 @@ def validate_required_files() -> list[str]:
     required=['.gitattributes','authority-registry.yaml','docs/Engineering_Rules_Adoption.md','docs/Project_Profile.md','docs/Concurrency_Model.md','docs/UI_Engineering_Profile.md','docs/Testing_Strategy.md','docs/Fake_Device_Simulator_Profile.md','docs/Conformance_Assessment.md','protocol/authority-lock.yaml','protocol/protocol.yaml','protocol/transport-profile-proposal.yaml','protocol/test-vectors/protocol-v0.1.0-vectors.json']
     return [f'missing required file: {name}' for name in required if not (ROOT/name).is_file()]
 
+def validate_authority_guidance() -> list[str]:
+    errors=[]
+    checks={
+        'CONTRIBUTING.md':[
+            'update the system repository before changing wire behavior;',
+            'keep the local protocol mirror exact',
+            'record unapproved transport changes only in a controlled proposal',
+        ],
+        'README.md':[
+            'The selectable-baud transport profile remains a pending proposal.',
+            'protocol/transport-profile-proposal.yaml',
+            'docs/System_Transport_Profile_Change_Proposal.md',
+            'baud-aware acquisition: 200 Hz at 115200 baud or faster',
+        ],
+        'NOTICE.md':[
+            'The selectable-baud transport profile remains a pending proposal and is not upstream',
+            'The exact local protocol mirror must remain unchanged',
+        ],
+    }
+    for name, fragments in checks.items():
+        text=(ROOT/name).read_text(encoding='utf-8')
+        for fragment in fragments:
+            if fragment not in text:
+                errors.append(f'{name} is missing authority guidance: {fragment}')
+    contributing=(ROOT/'CONTRIBUTING.md').read_text(encoding='utf-8')
+    if 'update `protocol/protocol.yaml` before changing wire behavior' in contributing:
+        errors.append('CONTRIBUTING.md incorrectly treats the local mirror as editable authority')
+    return errors
+
 def main() -> int:
-    errors=validate_required_files()+validate_xml()+validate_line_endings()
+    errors=validate_required_files()+validate_xml()+validate_line_endings()+validate_authority_guidance()
     if run('validate_protocol_contract.py') != 0: errors.append('protocol contract validator failed')
     if run('validate_source_headers.py') != 0: errors.append('source-policy validator failed')
     if errors:

@@ -2,6 +2,15 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.9 - 2026-07-26
+
+- restored contribution guidance requiring system-repository authority updates before local wire-behavior changes;
+- retained the exact local protocol mirror and restored prominent pending transport-proposal disclosures in README and NOTICE;
+- removed redundant instance UART-framing properties that triggered CA1822 analyzer warnings;
+- made `SerialDeviceTransport` apply the type-level 8-N-1/no-flow-control constants directly;
+- extended static validation to require direct fixed-framing application and reject reintroduced forwarding properties;
+- corrected the architecture summary to describe baud-aware acquisition rather than universal 200 Hz operation.
+
 ## 0.3.8 - 2026-07-26
 
 - fixed the Serial transport construction boundary to 8 data bits, no parity, 1 stop bit, and no flow control;

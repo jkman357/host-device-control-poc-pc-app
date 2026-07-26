@@ -52,6 +52,12 @@ SERIAL_CAPACITY_PATH = (
     / "HostDeviceControl.Transport.Serial"
     / "SerialStreamCapacity.cs"
 )
+SERIAL_TRANSPORT_PATH = (
+    ROOT
+    / "src"
+    / "HostDeviceControl.Transport.Serial"
+    / "SerialDeviceTransport.cs"
+)
 EXPECTED_PROTOCOL_SHA256 = (
     "7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e"
 )
@@ -59,7 +65,7 @@ EXPECTED_AUTHORITY_COMMIT = "e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679"
 EXPECTED_TRANSPORT_PROPOSAL_SHA256 = (
     "6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310"
 )
-EXPECTED_IMPLEMENTATION_BASE = "446827e9103872bd7d809005999fb8eab065a0b6"
+EXPECTED_IMPLEMENTATION_BASE = "ec83252f31a82a73b1f621378882361fd06fa941"
 
 
 def pascal_case(name: str) -> str:
@@ -290,6 +296,7 @@ def validate_transport_profile_proposal(
     )
     options_text = SERIAL_OPTIONS_PATH.read_text(encoding="utf-8")
     capacity_text = SERIAL_CAPACITY_PATH.read_text(encoding="utf-8")
+    transport_text = SERIAL_TRANSPORT_PATH.read_text(encoding="utf-8")
 
     allowed_baud_rates = parse_yaml_int_list(
         proposal_text,
@@ -364,10 +371,6 @@ def validate_transport_profile_proposal(
         "public const StopBits RequiredStopBits = StopBits.One;",
         "public const Handshake RequiredHandshake = Handshake.None;",
         "public SerialTransportOptions(\n        string portName,\n        int baudRate = DefaultBaudRate)",
-        "public Parity Parity => RequiredParity;",
-        "public int DataBits => RequiredDataBits;",
-        "public StopBits StopBits => RequiredStopBits;",
-        "public Handshake Handshake => RequiredHandshake;",
     )
     for fragment in required_option_fragments:
         if fragment not in options_text:
@@ -376,11 +379,28 @@ def validate_transport_profile_proposal(
                 f"transport profile: {fragment}"
             )
 
+    required_transport_fragments = (
+        "SerialTransportOptions.RequiredParity,",
+        "SerialTransportOptions.RequiredDataBits,",
+        "SerialTransportOptions.RequiredStopBits)",
+        "Handshake = SerialTransportOptions.RequiredHandshake,",
+    )
+    for fragment in required_transport_fragments:
+        if fragment not in transport_text:
+            errors.append(
+                "SerialDeviceTransport does not apply the fixed "
+                f"transport profile directly: {fragment}"
+            )
+
     forbidden_option_fragments = (
         "Parity parity =",
         "int dataBits =",
         "StopBits stopBits =",
         "Handshake handshake =",
+        "public Parity Parity => RequiredParity;",
+        "public int DataBits => RequiredDataBits;",
+        "public StopBits StopBits => RequiredStopBits;",
+        "public Handshake Handshake => RequiredHandshake;",
     )
     for fragment in forbidden_option_fragments:
         if fragment in options_text:

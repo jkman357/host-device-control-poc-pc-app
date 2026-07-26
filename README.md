@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.8 fixed UART-framing and baud-capacity candidate**, based on PC application commit
-`446827e9103872bd7d809005999fb8eab065a0b6`.
+**v0.3.9 authority-guidance and analyzer-cleanup candidate**, based on PC application commit
+`ec83252f31a82a73b1f621378882361fd06fa941`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -24,6 +24,12 @@ See `protocol/authority-lock.yaml`.
 Protocol v0.1.0 / wire version 0x01 remains `candidate_for_alignment`. A successful PC
 build or Fake Device run is implementation evidence only and does not promote the
 system protocol to `verified_baseline`.
+
+The selectable-baud transport profile remains a pending proposal. It does not override
+the pinned system protocol mirror and requires an approved system-repository update plus
+PC/MCU/adapter/clock interoperability evidence before promotion. See
+`protocol/transport-profile-proposal.yaml` and
+`docs/System_Transport_Profile_Change_Proposal.md`.
 
 ## Implemented system protocol behavior
 
@@ -64,7 +70,7 @@ All remain **Draft for Review**. Project-local adoption and deviations are recor
 - transport-independent, generation-owned `DeviceSession`;
 - protocol and Node state separated from WPF presentation state;
 - bounded receive, pending-command, UI telemetry, diagnostic, and recorder work;
-- 200 Hz acquisition with a bounded 50 ms WPF presentation batch;
+- baud-aware acquisition: 200 Hz at 115200 baud or faster, automatically reduced at lower stream-capable rates, with a bounded 50 ms WPF presentation batch;
 - visible CRC, format, unknown-ID, partial-frame, sample-loss, UI-drop, and recorder-drop counters;
 - bounded Fake Device with CRC corruption, sample loss, command delay, response suppression, timeout, and cancellation injection;
 - exact authority-mirror hashing and YAML-to-C# identity validation;
@@ -154,8 +160,10 @@ tools/
 protocol/
   authority-lock.yaml                 pinned external authority provenance
   protocol.yaml                       exact offline mirror; not local authority
+  transport-profile-proposal.yaml     pending selectable-rate/capacity proposal
   test-vectors/                       exact system normative vectors
 docs/
+  System_Transport_Profile_Change_Proposal.md
   Protocol_Decisions.md
   Project_Profile.md
   Architecture.md

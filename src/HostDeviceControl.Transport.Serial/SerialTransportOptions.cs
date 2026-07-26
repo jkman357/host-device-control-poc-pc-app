@@ -74,11 +74,4 @@ public sealed class SerialTransportOptions
 
     public int BaudRate { get; }
 
-    public Parity Parity => RequiredParity;
-
-    public int DataBits => RequiredDataBits;
-
-    public StopBits StopBits => RequiredStopBits;
-
-    public Handshake Handshake => RequiredHandshake;
 }

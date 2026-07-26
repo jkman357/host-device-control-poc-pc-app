@@ -130,11 +130,11 @@ public sealed class SerialDeviceTransport : IDeviceTransport
         return new SerialPort(
             _options.PortName,
             _options.BaudRate,
-            _options.Parity,
-            _options.DataBits,
-            _options.StopBits)
+            SerialTransportOptions.RequiredParity,
+            SerialTransportOptions.RequiredDataBits,
+            SerialTransportOptions.RequiredStopBits)
         {
-            Handshake = _options.Handshake,
+            Handshake = SerialTransportOptions.RequiredHandshake,
             DtrEnable = false,
             RtsEnable = false,
             ReadTimeout = SerialPort.InfiniteTimeout,
