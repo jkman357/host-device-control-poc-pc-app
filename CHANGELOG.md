@@ -2,15 +2,23 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.8 - 2026-07-26
+
+- fixed the Serial transport construction boundary to 8 data bits, no parity, 1 stop bit, and no flow control;
+- removed caller-selectable parity, data-bit, stop-bit, and handshake constructor parameters;
+- retained operator selection of the eleven controlled baud rates and the 115200 default;
+- extended static validation and Windows serial tests to reject framing-policy drift;
+- changed the UI capability text from an inaccurate `Hz max` claim to the stream rate selected by the capacity policy;
+- corrected candidate/version documentation carried forward from the prior package.
+
 ## 0.3.7 - 2026-07-26
 
-- preserved the exact upstream protocol mirror and added a separate pending selectable-baud transport-profile proposal;
-- added CI validation for proposal baud rates, default, framing capacity assumptions, telemetry frame size, and stream interval constants;
-- enforced an 80% UART line-utilization ceiling, automatically increasing the stream interval when required;
-- classified 1200, 2400, and 4800 baud as command-only because they cannot carry a telemetry frame within the 60000 us protocol maximum under the capacity policy;
-- displayed serial stream capability in the WPF UI and disabled Start Stream for command-only selections;
-- returned protocol/core engineering tests to portable `net8.0` and created a separate Windows serial transport test executable;
-- removed the remaining CA1806 test warning and retained both test outputs as CI evidence.
+- preserved the pinned external protocol mirror and added a separate pending system-authority transport-profile proposal;
+- added YAML-to-C# validation for allowed/default baud rates and the stream-capacity policy;
+- classified 1200, 2400, and 4800 as command-only under the 80% utilization policy;
+- selected safe stream intervals for 9600 through 57600 and retained 5000 us at 115200 and faster;
+- disabled Start Stream when the selected Serial rate cannot satisfy the protocol maximum interval;
+- separated portable protocol tests from Windows-only Serial transport tests and retained both CI evidence outputs.
 
 ## 0.3.6 - 2026-07-26
 

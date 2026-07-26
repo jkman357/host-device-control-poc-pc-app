@@ -14,7 +14,7 @@ The main controls include automation names, the operational log uses recycling v
 ## Baud capability presentation
 
 The Baud selector remains non-editable and locked while connected. A read-only
-capability label shows either the calculated maximum telemetry frequency or
-`command-only`. The Start Stream command is disabled when the selected serial rate
+capability label shows either the stream rate selected by the capacity policy or
+`command-only`; it does not label the configured rate as the physical maximum. The Start Stream command is disabled when the selected serial rate
 cannot fit one telemetry frame within the protocol maximum interval under the 80%
 line-utilization policy.

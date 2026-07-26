@@ -220,7 +220,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         {
             if (!IsSerialMode)
             {
-                return "Stream: 200 Hz";
+                return "Stream rate: 200 Hz";
             }
 
             if (!SerialStreamCapacity.TrySelectStreamIntervalUs(
@@ -232,7 +232,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             }
 
             double frequencyHz = 1_000_000.0 / intervalUs;
-            return $"Stream: {frequencyHz:0.##} Hz max";
+            return $"Stream rate: {frequencyHz:0.##} Hz";
         }
     }
 

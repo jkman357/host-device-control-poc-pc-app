@@ -7,7 +7,7 @@ No public contribution license is granted. Proposed changes may be reviewed at t
 Any accepted change must:
 
 1. preserve the authority and precedence recorded in `authority-registry.yaml`;
-2. update the system repository before changing wire behavior; keep the local protocol mirror exact, and record unapproved transport changes only in a controlled proposal;
+2. update `protocol/protocol.yaml` before changing wire behavior;
 3. keep continuous work bounded and document overflow, cancellation, timeout, and ownership;
 4. avoid blocking or device/protocol work on the WPF UI thread;
 5. update tests and fault injection for changed behavior;

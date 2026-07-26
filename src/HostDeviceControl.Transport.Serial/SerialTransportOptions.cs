@@ -9,6 +9,8 @@ namespace HostDeviceControl.Transport.Serial;
 
 /// <summary>
 /// Validated configuration for one Windows serial-port transport instance.
+/// The controlled transport profile fixes framing to 8-N-1 with no flow
+/// control; callers can select only the port name and approved baud rate.
 /// </summary>
 public sealed class SerialTransportOptions
 {
@@ -28,15 +30,14 @@ public sealed class SerialTransportOptions
     ];
 
     public const int DefaultBaudRate = 115200;
-    public const int DefaultDataBits = 8;
+    public const int RequiredDataBits = 8;
+    public const Parity RequiredParity = Parity.None;
+    public const StopBits RequiredStopBits = StopBits.One;
+    public const Handshake RequiredHandshake = Handshake.None;
 
     public SerialTransportOptions(
         string portName,
-        int baudRate = DefaultBaudRate,
-        Parity parity = Parity.None,
-        int dataBits = DefaultDataBits,
-        StopBits stopBits = StopBits.One,
-        Handshake handshake = Handshake.None)
+        int baudRate = DefaultBaudRate)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(portName);
 
@@ -48,32 +49,8 @@ public sealed class SerialTransportOptions
                 "Baud rate is not in the supported baud-rate set.");
         }
 
-        if ((dataBits < 5) || (dataBits > 8))
-        {
-            throw new ArgumentOutOfRangeException(nameof(dataBits));
-        }
-
-        if (!Enum.IsDefined(parity))
-        {
-            throw new ArgumentOutOfRangeException(nameof(parity));
-        }
-
-        if (!Enum.IsDefined(stopBits) || (stopBits == StopBits.None))
-        {
-            throw new ArgumentOutOfRangeException(nameof(stopBits));
-        }
-
-        if (!Enum.IsDefined(handshake))
-        {
-            throw new ArgumentOutOfRangeException(nameof(handshake));
-        }
-
         PortName = portName.Trim();
         BaudRate = baudRate;
-        Parity = parity;
-        DataBits = dataBits;
-        StopBits = stopBits;
-        Handshake = handshake;
     }
 
     /// <summary>
@@ -97,11 +74,11 @@ public sealed class SerialTransportOptions
 
     public int BaudRate { get; }
 
-    public Parity Parity { get; }
+    public Parity Parity => RequiredParity;
 
-    public int DataBits { get; }
+    public int DataBits => RequiredDataBits;
 
-    public StopBits StopBits { get; }
+    public StopBits StopBits => RequiredStopBits;
 
-    public Handshake Handshake { get; }
+    public Handshake Handshake => RequiredHandshake;
 }

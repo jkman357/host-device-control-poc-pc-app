@@ -6,12 +6,10 @@ This repository is a proof of concept for engineering evaluation. It is not a re
 product, medical-device implementation, safety mechanism, validated test system,
 production data-acquisition system, or certification of conformance.
 
-The 0.3.7 candidate consumes protocol v0.1.0 from
+The 0.3.8 candidate consumes protocol v0.1.0 from
 `host-device-control-poc-system/protocol/protocol.yaml`, pinned by
 `protocol/authority-lock.yaml`. The local protocol file is an offline mirror and does not
-replace the system-level authority. The selectable-baud transport profile is recorded
-as a pending proposal and is not upstream authority. The protocol remains
-`candidate_for_alignment` until
+replace the system-level authority. The protocol remains `candidate_for_alignment` until
 PC, MCU, shared-vector, hardware, pinned-commit, and human-approval gates are complete.
 
 The candidate also records Project-local adoption of five engineering documents from

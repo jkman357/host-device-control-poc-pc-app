@@ -57,7 +57,7 @@ Non-115200 use is incompatible with an MCU build that remains fixed at 115200.
 
 1. Human approval and commit in `host-device-control-poc-system`.
 2. Refresh the PC and MCU protocol mirrors, authority locks, and hashes.
-3. Implement the same allowed/default rates and capacity policy in MCU configuration.
+3. Implement the same allowed/default rates, fixed 8-N-1/no-flow-control framing, and capacity policy in MCU configuration.
 4. Confirm UART divisor error and clock tolerance at every promoted rate.
 5. Run shared vectors plus sustained physical stream, stop, reconnect, CRC, and loss
    tests at every promoted rate.

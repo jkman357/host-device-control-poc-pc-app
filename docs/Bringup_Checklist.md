@@ -15,6 +15,7 @@
 - [ ] `HostDeviceControl.App` is the startup project and launches without binding exceptions.
 - [ ] Transport, COM port, and baud controls are disabled while connected.
 - [ ] Baud selector contains exactly 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default selection is 115200.
+- [ ] Serial framing is fixed to 8 data bits, no parity, 1 stop bit, and no flow control.
 - [ ] Button enablement follows Disconnected/Ready/Streaming states.
 - [ ] Error text is visible without relying only on color.
 - [ ] Operational log remains responsive and bounded during a sustained stream.
@@ -34,7 +35,7 @@
 
 - [ ] Record COM port, selected baud, board identity, firmware commit/version, and test duration.
 - [ ] Confirm the USB-UART/VCP adapter, Windows driver, and MCU UART clock configuration support the selected baud before sustained testing.
-- [ ] Stream 200 Hz telemetry for the approved duration.
+- [ ] Stream at the rate shown by the capacity policy for the approved duration; use 200 Hz only where the selected baud supports the 5000 us interval.
 - [ ] Record frame/sample counts, CRC errors, format errors, unknown IDs, lost samples, UI drops, and recorder drops.
 - [ ] Verify CSV monotonic sample counter/device tick and record any gaps.
 - [ ] Exercise USB disconnect while idle, streaming, and recording.
@@ -54,7 +55,7 @@
 - Confirm PC driver, adapter/VCP, MCU clock, UART divisor, and both endpoints use the
   same rate.
 - Treat 1200, 2400, and 4800 baud as command-only under the 80% policy.
-- Confirm the UI reports the expected interval/frequency for 9600 through 57600.
+- Confirm the UI reports the selected stream rate, without presenting it as a physical maximum, for 9600 through 57600.
 - Confirm 115200 and faster retain 5000 us / 200 Hz.
 - Retain sustained frame, CRC, loss, reconnect, and stop evidence for each rate that
   is proposed for system-authority promotion.

@@ -59,7 +59,7 @@ EXPECTED_AUTHORITY_COMMIT = "e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679"
 EXPECTED_TRANSPORT_PROPOSAL_SHA256 = (
     "6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310"
 )
-EXPECTED_IMPLEMENTATION_BASE = "cf229be58b4ae15969ef447083d9c5982ff19ee7"
+EXPECTED_IMPLEMENTATION_BASE = "446827e9103872bd7d809005999fb8eab065a0b6"
 
 
 def pascal_case(name: str) -> str:
@@ -139,6 +139,17 @@ def parse_int_scalar(protocol_text: str, key: str) -> int:
     if match is None:
         raise ValueError(f"Missing protocol integer scalar: {key}")
     return int(match.group(1))
+
+
+def parse_string_scalar(text: str, key: str) -> str:
+    match = re.search(
+        rf"^\s*{re.escape(key)}:\s*([A-Za-z0-9_.-]+)\s*$",
+        text,
+        re.MULTILINE,
+    )
+    if match is None:
+        raise ValueError(f"Missing YAML string scalar: {key}")
+    return match.group(1)
 
 
 
@@ -331,6 +342,53 @@ def validate_transport_profile_proposal(
     if proposal_default not in allowed_baud_rates:
         errors.append("transport proposal default baud rate is not allowed")
 
+    proposal_data_bits = parse_int_scalar(proposal_text, "data_bits")
+    proposal_parity = parse_string_scalar(proposal_text, "parity")
+    proposal_stop_bits = parse_int_scalar(proposal_text, "stop_bits")
+    proposal_flow_control = parse_string_scalar(
+        proposal_text,
+        "flow_control",
+    )
+    require_equal("UART data bits", 8, proposal_data_bits, errors)
+    require_equal("UART parity", "none", proposal_parity, errors)
+    require_equal("UART stop bits", 1, proposal_stop_bits, errors)
+    require_equal(
+        "UART flow control",
+        "none",
+        proposal_flow_control,
+        errors,
+    )
+    required_option_fragments = (
+        "public const int RequiredDataBits = 8;",
+        "public const Parity RequiredParity = Parity.None;",
+        "public const StopBits RequiredStopBits = StopBits.One;",
+        "public const Handshake RequiredHandshake = Handshake.None;",
+        "public SerialTransportOptions(\n        string portName,\n        int baudRate = DefaultBaudRate)",
+        "public Parity Parity => RequiredParity;",
+        "public int DataBits => RequiredDataBits;",
+        "public StopBits StopBits => RequiredStopBits;",
+        "public Handshake Handshake => RequiredHandshake;",
+    )
+    for fragment in required_option_fragments:
+        if fragment not in options_text:
+            errors.append(
+                "SerialTransportOptions does not enforce the fixed "
+                f"transport profile: {fragment}"
+            )
+
+    forbidden_option_fragments = (
+        "Parity parity =",
+        "int dataBits =",
+        "StopBits stopBits =",
+        "Handshake handshake =",
+    )
+    for fragment in forbidden_option_fragments:
+        if fragment in options_text:
+            errors.append(
+                "SerialTransportOptions still exposes configurable UART "
+                f"framing: {fragment}"
+            )
+
     bits_per_byte = parse_int_scalar(
         proposal_text,
         "bits_per_uart_byte",
@@ -350,6 +408,15 @@ def validate_transport_profile_proposal(
     maximum_interval = parse_int_scalar(
         proposal_text,
         "maximum_stream_interval_us",
+    )
+    expected_bits_per_byte = 1 + proposal_data_bits + proposal_stop_bits
+    if proposal_parity != "none":
+        expected_bits_per_byte += 1
+    require_equal(
+        "proposal UART bits per byte",
+        expected_bits_per_byte,
+        bits_per_byte,
+        errors,
     )
     require_equal(
         "UART bits per byte",

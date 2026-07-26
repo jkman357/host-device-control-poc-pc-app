@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO.Ports;
 using HostDeviceControl.Core.Protocol;
 using HostDeviceControl.Transport.Serial;
 
@@ -17,6 +18,7 @@ internal static class Program
         PrintEvidenceHeader();
         Run("Supported baud-rate set", TestSupportedBaudRateSet);
         Run("Baud-rate validation", TestBaudRateValidation);
+        Run("Fixed UART framing", TestFixedUartFraming);
         Run("Stream-capacity intervals", TestStreamCapacityIntervals);
         Run("Stream-capacity argument validation", TestStreamCapacityValidation);
 
@@ -40,14 +42,14 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl serial transport test evidence");
-        Console.WriteLine("Software candidate: 0.3.7");
+        Console.WriteLine("Software candidate: 0.3.8");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "cf229be58b4ae15969ef447083d9c5982ff19ee7");
+            "446827e9103872bd7d809005999fb8eab065a0b6");
         Console.WriteLine(
             "Transport profile: pending system-authority proposal v1");
         Console.WriteLine($"Runtime: {Environment.Version}");
@@ -99,6 +101,21 @@ internal static class Program
             () => _ = new SerialTransportOptions("COM1", 300));
         AssertThrows<ArgumentOutOfRangeException>(
             () => _ = new SerialTransportOptions("COM1", 128000));
+    }
+
+    private static void TestFixedUartFraming()
+    {
+        var options = new SerialTransportOptions(" COM7 ", 57600);
+
+        AssertEqual("COM7", options.PortName);
+        AssertEqual(8, SerialTransportOptions.RequiredDataBits);
+        AssertEqual(Parity.None, SerialTransportOptions.RequiredParity);
+        AssertEqual(StopBits.One, SerialTransportOptions.RequiredStopBits);
+        AssertEqual(Handshake.None, SerialTransportOptions.RequiredHandshake);
+        AssertEqual(SerialTransportOptions.RequiredDataBits, options.DataBits);
+        AssertEqual(SerialTransportOptions.RequiredParity, options.Parity);
+        AssertEqual(SerialTransportOptions.RequiredStopBits, options.StopBits);
+        AssertEqual(SerialTransportOptions.RequiredHandshake, options.Handshake);
     }
 
     private static void TestStreamCapacityIntervals()

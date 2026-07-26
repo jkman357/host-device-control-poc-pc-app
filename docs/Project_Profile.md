@@ -5,14 +5,14 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.3.7
-- Implementation base: `cf229be58b4ae15969ef447083d9c5982ff19ee7`
+- Candidate version: 0.3.8
+- Implementation base: `446827e9103872bd7d809005999fb8eab065a0b6`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
 - Protocol authority: `host-device-control-poc-system/protocol/protocol.yaml` v0.1.0 at `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`; local exact mirror in `protocol/protocol.yaml`
 - Deployment: engineering workstation; not production or clinical software
 - Supported transports: bounded Fake byte stream and Windows SerialPort/VCP
-- Serial profile proposal: operator-selectable 8-N-1, no-flow-control baud rates of 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default 115200; pending system-authority approval
+- Serial profile proposal: operator-selectable baud rates of 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default 115200; API-enforced 8-N-1 with no flow control; pending system-authority approval
 - Storage model: operator-selected local CSV file plus bounded in-memory UI/log snapshots
 
 ## C# and platform profile
@@ -63,7 +63,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.3.7 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.3.8 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 
