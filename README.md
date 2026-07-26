@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.3 authoritative-state recovery candidate**, based on PC application commit
-`ba74d943e87deb8e51771e6a397b1b07fe37c8ed`.
+**v0.3.4 authoritative-state recovery candidate**, based on PC application commit
+`8d0e94e960fe78d8c7d1485471d3e8e418a63481`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 

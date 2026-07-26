@@ -4,7 +4,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## Candidate assessment
 
-The 0.3.3 candidate implements the PC-side behavior of the external system protocol
+The 0.3.4 candidate implements the PC-side behavior of the external system protocol
 v0.1.0 pinned in `protocol/authority-lock.yaml`. The local YAML is validated by exact
 SHA-256, and derived C# message IDs, result codes, Node states, status flags, framing
 constants, timeouts, stream limits, and normative vectors are checked for drift.

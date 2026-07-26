@@ -950,14 +950,15 @@ public sealed class DeviceSession : IAsyncDisposable
 
         try
         {
-            using var recoveryCancellation = new CancellationTokenSource(
-                _options.CommandTimeout);
+            // SendRequestAsync owns the single bounded recovery timer. Passing an
+            // independent, non-cancelled caller token avoids competing timers
+            // that can classify the same recovery attempt differently.
             await SendRequestAsync(
                 generation,
                 MessageType.Ping,
                 [],
                 _options.CommandTimeout,
-                recoveryCancellation.Token,
+                CancellationToken.None,
                 MessageType.Ack).ConfigureAwait(false);
 
             if ((command == MessageType.StartStream) &&

@@ -21,10 +21,10 @@ internal static class Program
 {
     private const int TestCommandTimeoutMilliseconds = 60;
     private const int TestStopTimeoutMilliseconds = 100;
-    private const int RecoveryTestCommandTimeoutMilliseconds = 250;
-    private const int RecoveryTestStopTimeoutMilliseconds = 300;
-    private const int TestShutdownTimeoutMilliseconds = 250;
-    private const int TestCancellationMilliseconds = 60;
+    private const int RecoveryTestCommandTimeoutMilliseconds = 1000;
+    private const int RecoveryTestStopTimeoutMilliseconds = 1000;
+    private const int TestShutdownTimeoutMilliseconds = 2000;
+    private const int TestHarnessSignalTimeoutMilliseconds = 2000;
     private const int TestReceiveBufferSizeBytes = 1024;
 
     private static readonly List<string> Failures = [];
@@ -83,18 +83,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.3");
+        Console.WriteLine("Software candidate: 0.3.4");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "ba74d943e87deb8e51771e6a397b1b07fe37c8ed");
+            "8d0e94e960fe78d8c7d1485471d3e8e418a63481");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.3");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.4");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -462,13 +462,14 @@ internal static class Program
             suppressResponseOnceFor: MessageType.StartStream);
         await using var session = new DeviceSession(transport);
         await session.ConnectAsync(CancellationToken.None);
-        using var cancellation = new CancellationTokenSource(
-            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+        using var cancellation = new CancellationTokenSource();
+        Task startTask = session.StartStreamingAsync(
+            ProtocolConstants.DefaultStreamIntervalUs,
+            cancellation.Token);
+        await WaitForSuppressedCommandAsync(transport);
+        cancellation.Cancel();
 
-        await AssertThrowsAsync<OperationCanceledException>(
-            () => session.StartStreamingAsync(
-                ProtocolConstants.DefaultStreamIntervalUs,
-                cancellation.Token));
+        await AssertThrowsAsync<OperationCanceledException>(() => startTask);
 
         AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
         AssertEqual(DeviceSessionState.Streaming, session.State);
@@ -483,11 +484,12 @@ internal static class Program
         await session.StartStreamingAsync(
             ProtocolConstants.DefaultStreamIntervalUs,
             CancellationToken.None);
-        using var cancellation = new CancellationTokenSource(
-            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+        using var cancellation = new CancellationTokenSource();
+        Task stopTask = session.StopStreamingAsync(cancellation.Token);
+        await WaitForSuppressedCommandAsync(transport);
+        cancellation.Cancel();
 
-        await AssertThrowsAsync<OperationCanceledException>(
-            () => session.StopStreamingAsync(cancellation.Token));
+        await AssertThrowsAsync<OperationCanceledException>(() => stopTask);
 
         AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
         AssertEqual(DeviceSessionState.Ready, session.State);
@@ -502,10 +504,12 @@ internal static class Program
             CreateShortTimeoutOptions());
         await session.ConnectAsync(CancellationToken.None);
 
-        await AssertThrowsAsync<TimeoutException>(
-            () => session.StartStreamingAsync(
-                ProtocolConstants.DefaultStreamIntervalUs,
-                CancellationToken.None));
+        Task startTask = session.StartStreamingAsync(
+            ProtocolConstants.DefaultStreamIntervalUs,
+            CancellationToken.None);
+        await WaitForSuppressedCommandAsync(transport);
+
+        await AssertThrowsAsync<TimeoutException>(() => startTask);
 
         AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
         AssertEqual(DeviceSessionState.Streaming, session.State);
@@ -523,11 +527,21 @@ internal static class Program
             ProtocolConstants.DefaultStreamIntervalUs,
             CancellationToken.None);
 
-        await AssertThrowsAsync<TimeoutException>(
-            () => session.StopStreamingAsync(CancellationToken.None));
+        Task stopTask = session.StopStreamingAsync(CancellationToken.None);
+        await WaitForSuppressedCommandAsync(transport);
+
+        await AssertThrowsAsync<TimeoutException>(() => stopTask);
 
         AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
         AssertEqual(DeviceSessionState.Ready, session.State);
+    }
+
+    private static async Task WaitForSuppressedCommandAsync(
+        ScriptedDeviceTransport transport)
+    {
+        using var signalTimeout = new CancellationTokenSource(
+            TimeSpan.FromMilliseconds(TestHarnessSignalTimeoutMilliseconds));
+        await transport.WaitForSuppressedCommandAsync(signalTimeout.Token);
     }
 
     private static DeviceSessionOptions CreateShortTimeoutOptions()
@@ -586,7 +600,7 @@ internal static class Program
         await using var transport = new FakeDeviceTransport(transportOptions);
         await using var session = new DeviceSession(transport, sessionOptions);
         using var cancellation = new CancellationTokenSource(
-            TimeSpan.FromMilliseconds(TestCancellationMilliseconds));
+            TimeSpan.FromMilliseconds(TestCommandTimeoutMilliseconds));
         await AssertThrowsAsync<OperationCanceledException>(
             () => session.ConnectAsync(cancellation.Token));
         AssertEqual(DeviceSessionState.Disconnected, session.State);
@@ -677,8 +691,12 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Failures.Add($"{name}: {exception.Message}");
+            string failure = $"{name}: {exception.Message}";
+            Failures.Add(failure);
             Console.Error.WriteLine($"FAIL  {name}: {exception}");
+            Console.Error.WriteLine(
+                $"::error title=Engineering protocol test failed::" +
+                EscapeWorkflowCommand(failure));
         }
     }
 
@@ -691,9 +709,21 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            Failures.Add($"{name}: {exception.Message}");
+            string failure = $"{name}: {exception.Message}";
+            Failures.Add(failure);
             Console.Error.WriteLine($"FAIL  {name}: {exception}");
+            Console.Error.WriteLine(
+                $"::error title=Engineering protocol test failed::" +
+                EscapeWorkflowCommand(failure));
         }
+    }
+
+    private static string EscapeWorkflowCommand(string value)
+    {
+        return value
+            .Replace("%", "%25", StringComparison.Ordinal)
+            .Replace("\r", "%0D", StringComparison.Ordinal)
+            .Replace("\n", "%0A", StringComparison.Ordinal);
     }
 
     private static void AssertTrue(bool value)
@@ -782,6 +812,8 @@ internal static class Program
         private readonly MessageType? _mismatchedResponseFor;
         private readonly bool _useNackForMismatch;
         private readonly MessageType? _suppressResponseOnceFor;
+        private readonly TaskCompletionSource<bool> _suppressedCommandApplied =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
         private DeviceOperatingState _state;
         private bool _suppressedResponseConsumed;
         private bool _disposed;
@@ -804,6 +836,18 @@ internal static class Program
         public void SetAuthoritativeState(DeviceOperatingState state)
         {
             _state = state;
+        }
+
+        public Task WaitForSuppressedCommandAsync(
+            CancellationToken cancellationToken)
+        {
+            if (!_suppressResponseOnceFor.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "No suppressed command is configured for this transport.");
+            }
+
+            return _suppressedCommandApplied.Task.WaitAsync(cancellationToken);
         }
 
         public Task ConnectAsync(CancellationToken cancellationToken)
@@ -859,6 +903,7 @@ internal static class Program
                 (_suppressResponseOnceFor == request.MessageType))
             {
                 _suppressedResponseConsumed = true;
+                _suppressedCommandApplied.TrySetResult(true);
                 return;
             }
 

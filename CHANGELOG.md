@@ -2,6 +2,16 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.4 - 2026-07-26
+
+- made cancellation recovery tests deterministic by waiting until the scripted Node has applied the command before cancelling the host operation;
+- made timeout recovery tests explicitly confirm command application before waiting for the bounded timeout;
+- removed competing recovery cancellation timers so one command timeout owns recovery classification;
+- increased test-only shutdown and recovery bounds to tolerate loaded GitHub-hosted Windows runners without weakening production protocol timeouts;
+- emitted one GitHub Actions error annotation per failed engineering test;
+- retained protocol-test output as a downloadable CI artifact and separated evidence collection from the final failure gate;
+- updated candidate provenance from implementation commit `8d0e94e960fe78d8c7d1485471d3e8e418a63481`.
+
 ## 0.3.3 - 2026-07-26
 
 - restored complete protocol-contract validation for identifiers, status flags, framing, payload sizes, stream limits, timeouts, authority provenance, and normative vectors;

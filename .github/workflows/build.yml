@@ -42,15 +42,20 @@ jobs:
         run: dotnet build HostDeviceControl.Poc.sln --configuration Release --no-restore
 
       - name: Engineering protocol tests
+        id: engineering_protocol_tests
+        continue-on-error: true
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Continue"
+          $PSNativeCommandUseErrorActionPreference = $false
           $outputPath = "protocol-test-output.txt"
           $output = & dotnet run `
             --project tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj `
             --configuration Release `
             --no-build 2>&1
           $testExitCode = $LASTEXITCODE
-          $output | Tee-Object -FilePath $outputPath
+          @($output) | ForEach-Object { "$_" } |
+            Tee-Object -FilePath $outputPath
 
           "## Engineering protocol tests" | Add-Content $env:GITHUB_STEP_SUMMARY
           '```text' | Add-Content $env:GITHUB_STEP_SUMMARY
@@ -58,3 +63,19 @@ jobs:
           '```' | Add-Content $env:GITHUB_STEP_SUMMARY
 
           exit $testExitCode
+
+      - name: Upload protocol-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protocol-test-evidence
+          path: protocol-test-output.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Enforce protocol-test result
+        if: steps.engineering_protocol_tests.outcome == 'failure'
+        shell: pwsh
+        run: |
+          Write-Error "Engineering protocol tests failed. See the job summary and protocol-test-evidence artifact."
+          exit 1
