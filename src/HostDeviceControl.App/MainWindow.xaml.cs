@@ -3,6 +3,7 @@
 
 using System;
 using System.ComponentModel;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using HostDeviceControl.App.ViewModels;
@@ -17,6 +18,7 @@ public partial class MainWindow : Window, IAsyncDisposable
     private readonly MainViewModel _viewModel;
     private bool _shutdownStarted;
     private bool _shutdownComplete;
+    private int _disposeStarted;
 
     public MainWindow()
     {
@@ -31,12 +33,22 @@ public partial class MainWindow : Window, IAsyncDisposable
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_shutdownComplete)
+        if (Interlocked.CompareExchange(ref _disposeStarted, 1, 0) != 0)
         {
             return;
         }
 
-        await _viewModel.DisposeAsync();
+        try
+        {
+            await _viewModel.DisposeAsync();
+            _shutdownComplete = true;
+            GC.SuppressFinalize(this);
+        }
+        catch
+        {
+            Volatile.Write(ref _disposeStarted, 0);
+            throw;
+        }
     }
 
     // Framework-required async event boundary. All exceptions are handled here.
@@ -58,7 +70,6 @@ public partial class MainWindow : Window, IAsyncDisposable
         try
         {
             await DisposeAsync();
-            _shutdownComplete = true;
             Closing -= OnClosing;
             Close();
         }

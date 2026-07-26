@@ -1,5 +1,19 @@
 # Changelog
 
+Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
+
+## 0.3.3 - 2026-07-26
+
+- restored complete protocol-contract validation for identifiers, status flags, framing, payload sizes, stream limits, timeouts, authority provenance, and normative vectors;
+- recovered authoritative Node state through an independently bounded PING after START_STREAM or STOP_STREAM cancellation and timeout;
+- synchronized public PING results into the session Ready/Streaming state;
+- added fault injection that applies a command and then suppresses its ACK, covering indeterminate command outcomes rather than only pre-execution cancellation;
+- added cancellation and timeout recovery regression tests for both start and stop operations;
+- recovered authoritative state after malformed or mismatched state-command responses before rethrowing the protocol error;
+- retained complete protocol-test exception details in the GitHub Actions step summary;
+- completed the WPF asynchronous disposal pattern with idempotence and `GC.SuppressFinalize`;
+- updated candidate provenance from implementation commit `ba74d943e87deb8e51771e6a397b1b07fe37c8ed`.
+
 ## 0.3.2 - 2026-07-25
 
 - fixed CI naming-policy overlap between private instance fields, constants, and static readonly fields;
@@ -9,8 +23,6 @@
 - preserved Ready/Streaming state for caller cancellation instead of forcing Faulted;
 - bounded session, recorder, and serial-transport disposal waits;
 - added regression tests for response correlation, reconnect state, and cancellation recovery.
-
-Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## 0.3.1 — Build portability and analyzer cleanup
 

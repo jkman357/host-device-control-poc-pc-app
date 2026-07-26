@@ -3,9 +3,9 @@
 
 registry_version: 3
 project: host-device-control-poc-pc-app
-candidate_version: 0.3.2
+candidate_version: 0.3.3
 status: system_protocol_alignment_candidate
-implementation_base_commit: 6a8d3f729ae7a9bea6ba819e391c6c75f8145e11
+implementation_base_commit: ba74d943e87deb8e51771e6a397b1b07fe37c8ed
 
 project_protocol_authority:
   repository: host-device-control-poc-system

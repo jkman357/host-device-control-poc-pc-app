@@ -21,6 +21,8 @@ internal static class Program
 {
     private const int TestCommandTimeoutMilliseconds = 60;
     private const int TestStopTimeoutMilliseconds = 100;
+    private const int RecoveryTestCommandTimeoutMilliseconds = 250;
+    private const int RecoveryTestStopTimeoutMilliseconds = 300;
     private const int TestShutdownTimeoutMilliseconds = 250;
     private const int TestCancellationMilliseconds = 60;
     private const int TestReceiveBufferSizeBytes = 1024;
@@ -53,8 +55,11 @@ internal static class Program
         await RunAsync("Streaming-state reconnect", TestStreamingStateReconnectAsync);
         await RunAsync("Mismatched ACK correlation", TestMismatchedAckCorrelationAsync);
         await RunAsync("Mismatched NACK correlation", TestMismatchedNackCorrelationAsync);
-        await RunAsync("Start cancellation recovery", TestStartCancellationRecoveryAsync);
-        await RunAsync("Stop cancellation recovery", TestStopCancellationRecoveryAsync);
+        await RunAsync("PING state synchronization", TestPingStateSynchronizationAsync);
+        await RunAsync("Start cancellation authoritative recovery", TestStartCancellationRecoveryAsync);
+        await RunAsync("Stop cancellation authoritative recovery", TestStopCancellationRecoveryAsync);
+        await RunAsync("Start timeout authoritative recovery", TestStartTimeoutRecoveryAsync);
+        await RunAsync("Stop timeout authoritative recovery", TestStopTimeoutRecoveryAsync);
         await RunAsync("Command timeout", TestCommandTimeoutAsync);
         await RunAsync("Command cancellation", TestCommandCancellationAsync);
 
@@ -78,18 +83,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.2");
+        Console.WriteLine("Software candidate: 0.3.3");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "6a8d3f729ae7a9bea6ba819e391c6c75f8145e11");
+            "ba74d943e87deb8e51771e6a397b1b07fe37c8ed");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.2");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.3");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -418,6 +423,7 @@ internal static class Program
                 CancellationToken.None));
 
         AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertEqual(DeviceSessionState.Ready, session.State);
     }
 
     private static async Task TestMismatchedNackCorrelationAsync()
@@ -434,12 +440,26 @@ internal static class Program
                 CancellationToken.None));
 
         AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertEqual(DeviceSessionState.Ready, session.State);
+    }
+
+    private static async Task TestPingStateSynchronizationAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport();
+        await using var session = new DeviceSession(transport);
+        await session.ConnectAsync(CancellationToken.None);
+
+        transport.SetAuthoritativeState(DeviceOperatingState.Streaming);
+        await session.PingAsync(CancellationToken.None);
+
+        AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
+        AssertEqual(DeviceSessionState.Streaming, session.State);
     }
 
     private static async Task TestStartCancellationRecoveryAsync()
     {
         await using var transport = new ScriptedDeviceTransport(
-            delayedRequest: MessageType.SetStreamConfig);
+            suppressResponseOnceFor: MessageType.StartStream);
         await using var session = new DeviceSession(transport);
         await session.ConnectAsync(CancellationToken.None);
         using var cancellation = new CancellationTokenSource(
@@ -450,14 +470,14 @@ internal static class Program
                 ProtocolConstants.DefaultStreamIntervalUs,
                 cancellation.Token));
 
-        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
-        AssertEqual(DeviceSessionState.Ready, session.State);
+        AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
+        AssertEqual(DeviceSessionState.Streaming, session.State);
     }
 
     private static async Task TestStopCancellationRecoveryAsync()
     {
         await using var transport = new ScriptedDeviceTransport(
-            delayedRequest: MessageType.StopStream);
+            suppressResponseOnceFor: MessageType.StopStream);
         await using var session = new DeviceSession(transport);
         await session.ConnectAsync(CancellationToken.None);
         await session.StartStreamingAsync(
@@ -469,8 +489,61 @@ internal static class Program
         await AssertThrowsAsync<OperationCanceledException>(
             () => session.StopStreamingAsync(cancellation.Token));
 
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertEqual(DeviceSessionState.Ready, session.State);
+    }
+
+    private static async Task TestStartTimeoutRecoveryAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            suppressResponseOnceFor: MessageType.StartStream);
+        await using var session = new DeviceSession(
+            transport,
+            CreateShortTimeoutOptions());
+        await session.ConnectAsync(CancellationToken.None);
+
+        await AssertThrowsAsync<TimeoutException>(
+            () => session.StartStreamingAsync(
+                ProtocolConstants.DefaultStreamIntervalUs,
+                CancellationToken.None));
+
         AssertEqual(DeviceOperatingState.Streaming, session.DeviceState);
         AssertEqual(DeviceSessionState.Streaming, session.State);
+    }
+
+    private static async Task TestStopTimeoutRecoveryAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            suppressResponseOnceFor: MessageType.StopStream);
+        await using var session = new DeviceSession(
+            transport,
+            CreateShortTimeoutOptions());
+        await session.ConnectAsync(CancellationToken.None);
+        await session.StartStreamingAsync(
+            ProtocolConstants.DefaultStreamIntervalUs,
+            CancellationToken.None);
+
+        await AssertThrowsAsync<TimeoutException>(
+            () => session.StopStreamingAsync(CancellationToken.None));
+
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertEqual(DeviceSessionState.Ready, session.State);
+    }
+
+    private static DeviceSessionOptions CreateShortTimeoutOptions()
+    {
+        return new DeviceSessionOptions
+        {
+            GetDeviceInfoTimeout = TimeSpan.FromMilliseconds(
+                RecoveryTestCommandTimeoutMilliseconds),
+            CommandTimeout = TimeSpan.FromMilliseconds(
+                RecoveryTestCommandTimeoutMilliseconds),
+            StopStreamTimeout = TimeSpan.FromMilliseconds(
+                RecoveryTestStopTimeoutMilliseconds),
+            ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(
+                TestShutdownTimeoutMilliseconds),
+            ReceiveBufferSizeBytes = TestReceiveBufferSizeBytes
+        };
     }
 
     private static async Task TestCommandTimeoutAsync()
@@ -605,7 +678,7 @@ internal static class Program
         catch (Exception exception)
         {
             Failures.Add($"{name}: {exception.Message}");
-            Console.Error.WriteLine($"FAIL  {name}");
+            Console.Error.WriteLine($"FAIL  {name}: {exception}");
         }
     }
 
@@ -619,7 +692,7 @@ internal static class Program
         catch (Exception exception)
         {
             Failures.Add($"{name}: {exception.Message}");
-            Console.Error.WriteLine($"FAIL  {name}");
+            Console.Error.WriteLine($"FAIL  {name}: {exception}");
         }
     }
 
@@ -698,6 +771,7 @@ internal static class Program
         throw new InvalidOperationException(
             $"Expected {typeof(TException).Name}.");
     }
+
     private sealed class ScriptedDeviceTransport : IDeviceTransport
     {
         private const int ReceiveCapacity = 4096;
@@ -707,24 +781,30 @@ internal static class Program
         private readonly DeviceOperatingState _initialState;
         private readonly MessageType? _mismatchedResponseFor;
         private readonly bool _useNackForMismatch;
-        private readonly MessageType? _delayedRequest;
+        private readonly MessageType? _suppressResponseOnceFor;
         private DeviceOperatingState _state;
+        private bool _suppressedResponseConsumed;
         private bool _disposed;
 
         public ScriptedDeviceTransport(
             DeviceOperatingState initialState = DeviceOperatingState.Idle,
             MessageType? mismatchedResponseFor = null,
             bool useNackForMismatch = false,
-            MessageType? delayedRequest = null)
+            MessageType? suppressResponseOnceFor = null)
         {
             _initialState = initialState;
             _state = initialState;
             _mismatchedResponseFor = mismatchedResponseFor;
             _useNackForMismatch = useNackForMismatch;
-            _delayedRequest = delayedRequest;
+            _suppressResponseOnceFor = suppressResponseOnceFor;
         }
 
         public bool IsConnected { get; private set; }
+
+        public void SetAuthoritativeState(DeviceOperatingState state)
+        {
+            _state = state;
+        }
 
         public Task ConnectAsync(CancellationToken cancellationToken)
         {
@@ -770,16 +850,18 @@ internal static class Program
             _decoder.Append(data.Span);
             if (!_decoder.TryRead(out ProtocolFrame? request) || request is null)
             {
-                throw new ProtocolException("Scripted transport received an incomplete request.");
-            }
-
-            if (_delayedRequest == request.MessageType)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken)
-                    .ConfigureAwait(false);
+                throw new ProtocolException(
+                    "Scripted transport received an incomplete request.");
             }
 
             ProtocolFrame response = CreateResponse(request);
+            if (!_suppressedResponseConsumed &&
+                (_suppressResponseOnceFor == request.MessageType))
+            {
+                _suppressedResponseConsumed = true;
+                return;
+            }
+
             byte[] encoded = FrameEncoder.Encode(response);
             foreach (byte value in encoded)
             {

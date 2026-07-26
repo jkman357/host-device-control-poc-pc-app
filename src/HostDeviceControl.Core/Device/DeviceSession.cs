@@ -200,6 +200,7 @@ public sealed class DeviceSession : IAsyncDisposable
         try
         {
             EnsureState(DeviceSessionState.Ready, DeviceSessionState.Streaming);
+            DeviceOperatingState? previousDeviceState = DeviceState;
             await SendRequestAsync(
                 ConnectionGeneration,
                 MessageType.Ping,
@@ -207,6 +208,14 @@ public sealed class DeviceSession : IAsyncDisposable
                 _options.CommandTimeout,
                 cancellationToken,
                 MessageType.Ack).ConfigureAwait(false);
+
+            if ((previousDeviceState != DeviceOperatingState.Streaming) &&
+                (DeviceState == DeviceOperatingState.Streaming))
+            {
+                _lastSampleCounter = null;
+            }
+
+            SynchronizeSessionStateFromDevice();
         }
         finally
         {
@@ -224,12 +233,12 @@ public sealed class DeviceSession : IAsyncDisposable
     {
         ThrowIfDisposed();
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        long generation = ConnectionGeneration;
 
         try
         {
             EnsureState(DeviceSessionState.Ready);
             ValidateStreamInterval(intervalUs);
-            long generation = ConnectionGeneration;
 
             SetState(DeviceSessionState.StartingStream);
 
@@ -253,9 +262,22 @@ public sealed class DeviceSession : IAsyncDisposable
             SetState(DeviceSessionState.Streaming);
             PublishDiagnostic($"Streaming started at {intervalUs} us interval.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            SynchronizeSessionStateFromDevice();
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StartStream,
+                "cancellation",
+                exception).ConfigureAwait(false);
+            throw;
+        }
+        catch (TimeoutException exception)
+        {
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StartStream,
+                "timeout",
+                exception).ConfigureAwait(false);
             throw;
         }
         catch (DeviceCommandException)
@@ -263,8 +285,18 @@ public sealed class DeviceSession : IAsyncDisposable
             SynchronizeSessionStateFromDevice();
             throw;
         }
+        catch (ProtocolException exception)
+        {
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StartStream,
+                "protocol response",
+                exception).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
+            SetDeviceState(null);
             SetState(DeviceSessionState.Faulted);
             throw;
         }
@@ -281,11 +313,11 @@ public sealed class DeviceSession : IAsyncDisposable
     {
         ThrowIfDisposed();
         await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        long generation = ConnectionGeneration;
 
         try
         {
             EnsureState(DeviceSessionState.Streaming);
-            long generation = ConnectionGeneration;
             SetState(DeviceSessionState.StoppingStream);
 
             await SendRequestAsync(
@@ -299,9 +331,22 @@ public sealed class DeviceSession : IAsyncDisposable
             SetState(DeviceSessionState.Ready);
             PublishDiagnostic("Streaming stopped.");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
-            SynchronizeSessionStateFromDevice();
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StopStream,
+                "cancellation",
+                exception).ConfigureAwait(false);
+            throw;
+        }
+        catch (TimeoutException exception)
+        {
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StopStream,
+                "timeout",
+                exception).ConfigureAwait(false);
             throw;
         }
         catch (DeviceCommandException)
@@ -309,8 +354,18 @@ public sealed class DeviceSession : IAsyncDisposable
             SynchronizeSessionStateFromDevice();
             throw;
         }
+        catch (ProtocolException exception)
+        {
+            await RecoverAuthoritativeStateAsync(
+                generation,
+                MessageType.StopStream,
+                "protocol response",
+                exception).ConfigureAwait(false);
+            throw;
+        }
         catch
         {
+            SetDeviceState(null);
             SetState(DeviceSessionState.Faulted);
             throw;
         }
@@ -883,6 +938,49 @@ public sealed class DeviceSession : IAsyncDisposable
 
         throw new InvalidOperationException(
             $"Operation is not allowed while the session is {currentState}.");
+    }
+
+    private async Task RecoverAuthoritativeStateAsync(
+        long generation,
+        MessageType command,
+        string outcome,
+        Exception originalException)
+    {
+        string context = $"{command} {outcome}";
+
+        try
+        {
+            using var recoveryCancellation = new CancellationTokenSource(
+                _options.CommandTimeout);
+            await SendRequestAsync(
+                generation,
+                MessageType.Ping,
+                [],
+                _options.CommandTimeout,
+                recoveryCancellation.Token,
+                MessageType.Ack).ConfigureAwait(false);
+
+            if ((command == MessageType.StartStream) &&
+                (DeviceState == DeviceOperatingState.Streaming))
+            {
+                _lastSampleCounter = null;
+            }
+
+            SynchronizeSessionStateFromDevice();
+            PublishDiagnostic(
+                $"Recovered authoritative state after {context}: {DeviceState}.");
+        }
+        catch (Exception recoveryException)
+        {
+            SetDeviceState(null);
+            SetState(DeviceSessionState.Faulted);
+            PublishDiagnostic(
+                $"Authoritative state recovery failed after {context}: " +
+                recoveryException.Message);
+            throw new InvalidOperationException(
+                $"Unable to recover authoritative device state after {context}.",
+                new AggregateException(originalException, recoveryException));
+        }
     }
 
     private void SynchronizeSessionStateFromDevice()

@@ -6,7 +6,7 @@ This repository is a proof of concept for engineering evaluation. It is not a re
 product, medical-device implementation, safety mechanism, validated test system,
 production data-acquisition system, or certification of conformance.
 
-The 0.3.2 candidate consumes protocol v0.1.0 from
+The 0.3.3 candidate consumes protocol v0.1.0 from
 `host-device-control-poc-system/protocol/protocol.yaml`, pinned by
 `protocol/authority-lock.yaml`. The local protocol file is an offline mirror and does not
 replace the system-level authority. The protocol remains `candidate_for_alignment` until

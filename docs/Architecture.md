@@ -32,7 +32,7 @@ bounded transport bytes
   -> 50 ms WPF batch + asynchronous CSV writer
 ```
 
-`DeviceSession` is the authority for PC connection lifecycle and request correlation, and it tracks the authoritative Node operating state reported by ACK/NACK and DEVICE_STATUS. The ViewModel displays that state and cannot directly write protocol bytes. A transport cannot interpret ACK/NACK, Node state, or telemetry meaning. The wire contract remains external to this repository and is consumed through the pinned protocol mirror.
+`DeviceSession` is the authority for PC connection lifecycle and request correlation, and it tracks the authoritative Node operating state reported by ACK/NACK and DEVICE_STATUS. After an ambiguous START_STREAM or STOP_STREAM cancellation, timeout, or malformed response, it performs an independently bounded PING before deciding whether the session is Ready, Streaming, or Faulted. The ViewModel displays that state and cannot directly write protocol bytes. A transport cannot interpret ACK/NACK, Node state, or telemetry meaning. The wire contract remains external to this repository and is consumed through the pinned protocol mirror.
 
 ## Connection generation
 

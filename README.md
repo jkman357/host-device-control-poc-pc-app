@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.2 CI and response-correlation hardening candidate**, based on PC application commit
-`6a8d3f729ae7a9bea6ba819e391c6c75f8145e11`.
+**v0.3.3 authoritative-state recovery candidate**, based on PC application commit
+`ba74d943e87deb8e51771e6a397b1b07fe37c8ed`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -35,7 +35,8 @@ system protocol to `verified_baseline`.
 - DEVICE_INFO, DEVICE_STATUS, TELEMETRY_SAMPLE, and ERROR_REPORT decoding;
 - non-zero host command sequences and independent unsolicited message sequences;
 - validated ACK/NACK request correlation before authoritative Node-state updates;
-- connection handshake state synchronization through PING;
+- connection handshake and explicit PING state synchronization;
+- independently bounded authoritative-state recovery after ambiguous START/STOP cancellation or timeout;
 - duplicate direct-response suppression and unmatched-sequence diagnostics;
 - 1000 ms default command timeout, 1500 ms STOP_STREAM timeout, and 250 ms partial-frame timeout;
 - strict payload length, enum, UTF-8, finite-float, and stream-range validation;
@@ -64,7 +65,7 @@ All remain **Draft for Review**. Project-local adoption and deviations are recor
 - bounded receive, pending-command, UI telemetry, diagnostic, and recorder work;
 - 200 Hz acquisition with a bounded 50 ms WPF presentation batch;
 - visible CRC, format, unknown-ID, partial-frame, sample-loss, UI-drop, and recorder-drop counters;
-- bounded Fake Device with CRC corruption, sample loss, command delay, timeout, and cancellation injection;
+- bounded Fake Device with CRC corruption, sample loss, command delay, response suppression, timeout, and cancellation injection;
 - exact authority-mirror hashing and YAML-to-C# identity validation.
 
 ## Prerequisites

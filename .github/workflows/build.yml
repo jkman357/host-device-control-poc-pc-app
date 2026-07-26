@@ -42,4 +42,19 @@ jobs:
         run: dotnet build HostDeviceControl.Poc.sln --configuration Release --no-restore
 
       - name: Engineering protocol tests
-        run: dotnet run --project tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj --configuration Release --no-build
+        shell: pwsh
+        run: |
+          $outputPath = "protocol-test-output.txt"
+          $output = & dotnet run `
+            --project tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj `
+            --configuration Release `
+            --no-build 2>&1
+          $testExitCode = $LASTEXITCODE
+          $output | Tee-Object -FilePath $outputPath
+
+          "## Engineering protocol tests" | Add-Content $env:GITHUB_STEP_SUMMARY
+          '```text' | Add-Content $env:GITHUB_STEP_SUMMARY
+          Get-Content $outputPath | Add-Content $env:GITHUB_STEP_SUMMARY
+          '```' | Add-Content $env:GITHUB_STEP_SUMMARY
+
+          exit $testExitCode
