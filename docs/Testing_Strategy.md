@@ -6,7 +6,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 1. Authority validation: exact protocol SHA-256, provenance lock, external protocol metadata, and exact system test-vector mirrors.
 2. Static implementation validation: C# message IDs, result codes, Node states, status flags, framing constants, timeouts, stream bounds, ownership headers, and bounded-work patterns.
-3. Protocol unit tests: CRC, frame round trip, normative PING/ACK vectors, fragmentation, noise recovery, unknown IDs, malformed ACK/NACK state, partial-frame discard, strict UTF-8, finite telemetry, DEVICE_STATUS, and ERROR_REPORT.
+3. Protocol and transport-configuration unit tests: CRC, frame round trip, normative PING/ACK vectors, fragmentation, noise recovery, strict unknown-ID rejection, permissive fake-Node unknown-ID preservation, malformed ACK/NACK state, partial-frame discard, strict UTF-8, finite telemetry, DEVICE_STATUS, ERROR_REPORT, exact supported baud-rate ordering, default baud rate, and rejection of unsupported baud rates.
 4. Concurrency/policy tests: bounded drop-oldest behavior, request timeout, cancellation, duplicate-response policy, authoritative PING recovery, and deterministic shutdown paths.
 5. Simulator integration tests: handshake, idle/streaming transitions, stream start/stop, CRC corruption, sample loss, command failure behavior, and apply-command-then-suppress-ACK fault injection.
 6. Manual WPF review: command-state enablement, Node-state/status/error visibility, chart responsiveness, recording lifecycle, and close behavior.

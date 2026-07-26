@@ -6,25 +6,42 @@ using System;
 namespace HostDeviceControl.Core.Protocol;
 
 /// <summary>
-/// Represents one validated host-device protocol frame.
+/// Represents one immutable host-device protocol frame.
 /// </summary>
 public sealed class ProtocolFrame
 {
     private readonly byte[] _payload;
 
     /// <summary>
-    /// Initializes an immutable frame snapshot. The payload is copied so later
-    /// caller mutation cannot change the frame after validation or correlation.
+    /// Initializes an immutable frame snapshot for a message type defined by
+    /// the Project Protocol. The payload is copied so later caller mutation
+    /// cannot change the frame after validation or correlation.
     /// </summary>
     public ProtocolFrame(
         byte version,
         MessageType messageType,
         ushort sequence,
         byte[] payload)
+        : this(
+            version,
+            messageType,
+            sequence,
+            payload,
+            allowUnknownMessageType: false)
+    {
+    }
+
+    private ProtocolFrame(
+        byte version,
+        MessageType messageType,
+        ushort sequence,
+        byte[] payload,
+        bool allowUnknownMessageType)
     {
         ArgumentNullException.ThrowIfNull(payload);
 
-        if (!MessageTypeValidator.IsDefined((byte)messageType))
+        if (!allowUnknownMessageType &&
+            !MessageTypeValidator.IsDefined((byte)messageType))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(messageType),
@@ -47,12 +64,34 @@ public sealed class ProtocolFrame
     }
 
     /// <summary>
+    /// Creates a frame decoded from a validated wire envelope. A permissive
+    /// fake-Node decoder may preserve an unknown raw request identifier so the
+    /// simulator can return the protocol-defined INVALID_COMMAND NACK.
+    /// </summary>
+    internal static ProtocolFrame CreateDecoded(
+        byte version,
+        byte rawMessageType,
+        ushort sequence,
+        byte[] payload,
+        bool allowUnknownMessageType)
+    {
+        return new ProtocolFrame(
+            version,
+            (MessageType)rawMessageType,
+            sequence,
+            payload,
+            allowUnknownMessageType);
+    }
+
+    /// <summary>
     /// Gets the protocol wire version.
     /// </summary>
     public byte Version { get; }
 
     /// <summary>
-    /// Gets the validated message type.
+    /// Gets the raw message identifier represented by the protocol enum.
+    /// Normal application decoders expose only defined values; a permissive
+    /// fake-Node decoder may expose an undefined request identifier.
     /// </summary>
     public MessageType MessageType { get; }
 

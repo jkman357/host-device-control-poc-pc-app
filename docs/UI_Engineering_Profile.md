@@ -2,7 +2,7 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
-The WPF UI presents, but does not own, device authority. Button availability is derived from `DeviceSessionState`. Transport configuration is disabled while a session is active. Display-only bindings are explicitly `OneWay`; editable fields are explicitly `TwoWay`.
+The WPF UI presents, but does not own, device authority. Button availability is derived from `DeviceSessionState`. Transport configuration is disabled while a session is active. The baud-rate control is a non-editable selector backed by the Serial transport's single supported-rate list, with 115200 selected by default. Display-only bindings are explicitly `OneWay`; editable fields are explicitly `TwoWay`.
 
 Telemetry arrives independently of UI rendering. A bounded drop-oldest buffer protects acquisition from UI stalls, and the UI drains a bounded batch every 50 ms. CRC, format, unknown-ID, lost-sample, UI-drop, queue-depth, and recorder-drop indicators remain visible.
 

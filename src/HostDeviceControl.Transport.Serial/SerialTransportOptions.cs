@@ -2,6 +2,7 @@
 // No license is granted. See LICENSE and NOTICE.md.
 
 using System;
+using System.Collections.Generic;
 using System.IO.Ports;
 
 namespace HostDeviceControl.Transport.Serial;
@@ -11,6 +12,21 @@ namespace HostDeviceControl.Transport.Serial;
 /// </summary>
 public sealed class SerialTransportOptions
 {
+    private static readonly int[] SupportedBaudRateValues =
+    [
+        1200,
+        2400,
+        4800,
+        9600,
+        19200,
+        38400,
+        57600,
+        115200,
+        230400,
+        460800,
+        921600
+    ];
+
     public const int DefaultBaudRate = 115200;
     public const int DefaultDataBits = 8;
 
@@ -24,7 +40,13 @@ public sealed class SerialTransportOptions
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(portName);
 
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(baudRate);
+        if (Array.BinarySearch(SupportedBaudRateValues, baudRate) < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(baudRate),
+                baudRate,
+                "Baud rate is not in the supported baud-rate set.");
+        }
 
         if ((dataBits < 5) || (dataBits > 8))
         {
@@ -53,6 +75,14 @@ public sealed class SerialTransportOptions
         StopBits = stopBits;
         Handshake = handshake;
     }
+
+    /// <summary>
+    /// Gets the baud rates exposed by the application and accepted by this
+    /// transport configuration. The physical adapter and target must also
+    /// support the selected rate.
+    /// </summary>
+    public static IReadOnlyList<int> SupportedBaudRates { get; } =
+        Array.AsReadOnly(SupportedBaudRateValues);
 
     public string PortName { get; }
 

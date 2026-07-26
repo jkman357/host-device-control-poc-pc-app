@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.4 authoritative-state recovery candidate**, based on PC application commit
-`8d0e94e960fe78d8c7d1485471d3e8e418a63481`.
+**v0.3.6 selectable UART baud-rate candidate**, based on PC application commit
+`19bac103c6468ec50d15239ad1feed12e44541d4`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -40,6 +40,7 @@ system protocol to `verified_baseline`.
 - duplicate direct-response suppression and unmatched-sequence diagnostics;
 - 1000 ms default command timeout, 1500 ms STOP_STREAM timeout, and 250 ms partial-frame timeout;
 - strict payload length, enum, UTF-8, finite-float, and stream-range validation;
+- strict PC-side unknown-ID rejection with a narrowly scoped permissive fake-Node request decoder;
 - Fake Node INVALID_COMMAND, INVALID_LENGTH, INVALID_VALUE, INVALID_STATE, and UNSUPPORTED_VERSION behavior;
 - normative cross-language PING and ACK frame vectors from the system repository.
 
@@ -66,7 +67,8 @@ All remain **Draft for Review**. Project-local adoption and deviations are recor
 - 200 Hz acquisition with a bounded 50 ms WPF presentation batch;
 - visible CRC, format, unknown-ID, partial-frame, sample-loss, UI-drop, and recorder-drop counters;
 - bounded Fake Device with CRC corruption, sample loss, command delay, response suppression, timeout, and cancellation injection;
-- exact authority-mirror hashing and YAML-to-C# identity validation.
+- exact authority-mirror hashing and YAML-to-C# identity validation;
+- one transport-owned supported baud-rate set shared by validation, tests, and the WPF selector.
 
 ## Prerequisites
 
@@ -111,9 +113,22 @@ delivery, and WPF rendering.
 
 1. Build MCU firmware from the same system protocol authority commit.
 2. Connect the board through ST-LINK USB and identify the Virtual COM Port.
-3. Select `Serial Port`, the COM port, and 115200 baud.
-4. Connect, verify DEVICE_INFO, configure 5000 us streaming, and start telemetry.
-5. Execute and retain the checks in `docs/Bringup_Checklist.md`.
+3. Select `Serial Port`, the COM port, and one supported baud rate. The default is
+   `115200`.
+4. Confirm that the MCU UART configuration and USB-UART/VCP adapter support the
+   same baud rate.
+5. Connect, verify DEVICE_INFO, configure 5000 us streaming, and start telemetry.
+6. Execute and retain the checks in `docs/Bringup_Checklist.md`.
+
+Supported selections:
+
+```text
+1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200,
+230400, 460800, 921600
+```
+
+The selector is locked while a session is active. Windows and the physical adapter
+may still reject a selected rate that the driver or hardware cannot provide.
 
 ## Repository structure
 

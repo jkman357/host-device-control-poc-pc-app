@@ -5,7 +5,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -62,8 +61,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     private DeviceSession? _session;
     private string _selectedConnectionMode = FakeConnectionMode;
     private string? _selectedPortName;
-    private string _baudRate = SerialTransportOptions.DefaultBaudRate.ToString(
-        CultureInfo.InvariantCulture);
+    private int _selectedBaudRate = SerialTransportOptions.DefaultBaudRate;
     private string _sessionState = DeviceSessionState.Disconnected.ToString();
     private string _deviceSummary = "Not connected";
     private string _statusMessage =
@@ -99,6 +97,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         _timeProvider = timeProvider ?? TimeProvider.System;
 
         ConnectionModes = [FakeConnectionMode, SerialConnectionMode];
+        BaudRates = SerialTransportOptions.SupportedBaudRates;
         PortNames = new ObservableCollection<string>();
         LogEntries = new ObservableCollection<string>();
 
@@ -145,6 +144,8 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     }
 
     public IReadOnlyList<string> ConnectionModes { get; }
+
+    public IReadOnlyList<int> BaudRates { get; }
 
     public ObservableCollection<string> PortNames { get; }
 
@@ -200,10 +201,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
         set => SetProperty(ref _selectedPortName, value);
     }
 
-    public string BaudRate
+    public int SelectedBaudRate
     {
-        get => _baudRate;
-        set => SetProperty(ref _baudRate, value);
+        get => _selectedBaudRate;
+        set => SetProperty(ref _selectedBaudRate, value);
     }
 
     public string SessionState
@@ -363,7 +364,11 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             _session = session;
             NotifySessionOwnershipChanged();
 
-            StatusMessage = $"Connecting through {SelectedConnectionMode}...";
+            string connectionDescription = IsSerialMode
+                ? $"{SelectedConnectionMode} " +
+                  $"({SelectedPortName}, {SelectedBaudRate} baud)"
+                : SelectedConnectionMode;
+            StatusMessage = $"Connecting through {connectionDescription}...";
             await session.ConnectAsync(cancellationToken);
 
             UpdateDeviceSummary();
@@ -396,19 +401,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             throw new InvalidOperationException("Select a COM port first.");
         }
 
-        if (!int.TryParse(
-                BaudRate,
-                NumberStyles.None,
-                CultureInfo.InvariantCulture,
-                out int baudRate) ||
-            (baudRate <= 0))
-        {
-            throw new InvalidOperationException(
-                "Baud rate must be a positive integer.");
-        }
-
         return new SerialDeviceTransport(
-            new SerialTransportOptions(SelectedPortName, baudRate));
+            new SerialTransportOptions(
+                SelectedPortName,
+                SelectedBaudRate));
     }
 
     private Task DisconnectAsync()

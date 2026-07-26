@@ -14,6 +14,7 @@ using HostDeviceControl.Core.Device;
 using HostDeviceControl.Core.Models;
 using HostDeviceControl.Core.Protocol;
 using HostDeviceControl.Transport.Fake;
+using HostDeviceControl.Transport.Serial;
 
 namespace HostDeviceControl.Protocol.Tests;
 
@@ -40,12 +41,16 @@ internal static class Program
         Run("Noise resynchronization", TestNoiseResynchronization);
         Run("CRC rejection", TestCrcRejection);
         Run("Unknown message rejection", TestUnknownMessageRejection);
+        Run("Public frame rejects unknown message", TestPublicFrameRejectsUnknownMessage);
+        Run("Permissive unknown message decode", TestPermissiveUnknownMessageDecode);
         Run("Malformed ACK rejection", TestMalformedAckRejection);
         Run("Partial-frame timeout discard", TestPartialFrameTimeoutDiscard);
         Run("Device status codec", TestDeviceStatusCodec);
         Run("Error report codec", TestErrorReportCodec);
         Run("Non-finite telemetry rejection", TestNonFiniteTelemetryRejection);
         Run("Bounded UI buffer policy", TestBoundedDropOldestBuffer);
+        Run("Serial supported baud-rate set", TestSerialSupportedBaudRateSet);
+        Run("Serial baud-rate validation", TestSerialBaudRateValidation);
         await RunAsync("Fake device happy path", TestFakeDeviceSessionAsync);
         await RunAsync("Fake invalid-length NACK", TestFakeInvalidLengthNackAsync);
         await RunAsync("Fake unsupported-version NACK", TestFakeUnsupportedVersionNackAsync);
@@ -83,18 +88,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.4");
+        Console.WriteLine("Software candidate: 0.3.6");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "8d0e94e960fe78d8c7d1485471d3e8e418a63481");
+            "19bac103c6468ec50d15239ad1feed12e44541d4");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.4");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.6");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -223,6 +228,40 @@ internal static class Program
         AssertEqual(1L, decoder.UnknownMessageTypeCount);
     }
 
+    private static void TestPublicFrameRejectsUnknownMessage()
+    {
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => new ProtocolFrame(
+                ProtocolConstants.WireVersion,
+                (MessageType)0x7F,
+                12,
+                []));
+    }
+
+    private static void TestPermissiveUnknownMessageDecode()
+    {
+        const byte UnknownRequestId = 0x7F;
+        const ushort Sequence = 12;
+        byte[] encoded = FrameEncoder.Encode(
+            new ProtocolFrame(
+                ProtocolConstants.WireVersion,
+                MessageType.Ping,
+                Sequence,
+                []));
+        encoded[ProtocolConstants.MessageTypeOffset] = UnknownRequestId;
+        RewriteCrc(encoded);
+
+        var decoder = new FrameDecoder(allowUnknownMessageTypes: true);
+        decoder.Append(encoded);
+
+        AssertTrue(decoder.TryRead(out ProtocolFrame? frame));
+        AssertNotNull(frame);
+        AssertEqual((MessageType)UnknownRequestId, frame!.MessageType);
+        AssertEqual(Sequence, frame.Sequence);
+        AssertEqual(1L, decoder.UnknownMessageTypeCount);
+        AssertEqual(0L, decoder.FormatErrorCount);
+    }
+
     private static void TestMalformedAckRejection()
     {
         AssertThrows<ProtocolException>(
@@ -292,6 +331,50 @@ internal static class Program
         AssertSpanEqual<int>([2, 3, 4], values.ToArray());
     }
 
+    private static void TestSerialSupportedBaudRateSet()
+    {
+        int[] expected =
+        [
+            1200,
+            2400,
+            4800,
+            9600,
+            19200,
+            38400,
+            57600,
+            115200,
+            230400,
+            460800,
+            921600
+        ];
+
+        AssertEqual(expected.Length, SerialTransportOptions.SupportedBaudRates.Count);
+        for (int index = 0; index < expected.Length; index++)
+        {
+            AssertEqual(
+                expected[index],
+                SerialTransportOptions.SupportedBaudRates[index]);
+        }
+
+        AssertEqual(115200, SerialTransportOptions.DefaultBaudRate);
+    }
+
+    private static void TestSerialBaudRateValidation()
+    {
+        foreach (int baudRate in SerialTransportOptions.SupportedBaudRates)
+        {
+            var options = new SerialTransportOptions("COM1", baudRate);
+            AssertEqual(baudRate, options.BaudRate);
+        }
+
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => _ = new SerialTransportOptions("COM1", 0));
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => _ = new SerialTransportOptions("COM1", 300));
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => _ = new SerialTransportOptions("COM1", 128000));
+    }
+
     private static async Task TestFakeDeviceSessionAsync()
     {
         await using var transport = new FakeDeviceTransport();
@@ -352,22 +435,28 @@ internal static class Program
     private static async Task TestFakeUnknownCommandNackAsync()
     {
         const byte UnknownRequestId = 0x7F;
+        const ushort Sequence = 23;
         await using var transport = new FakeDeviceTransport();
         await transport.ConnectAsync(CancellationToken.None);
-        var request = new ProtocolFrame(
-            ProtocolConstants.WireVersion,
-            (MessageType)UnknownRequestId,
-            23,
-            []);
+        byte[] requestBytes = FrameEncoder.Encode(
+            new ProtocolFrame(
+                ProtocolConstants.WireVersion,
+                MessageType.Ping,
+                Sequence,
+                []));
+        requestBytes[ProtocolConstants.MessageTypeOffset] = UnknownRequestId;
+        RewriteCrc(requestBytes);
 
-        await transport.WriteAsync(
-            FrameEncoder.Encode(request),
-            CancellationToken.None);
+        await transport.WriteAsync(requestBytes, CancellationToken.None);
         ProtocolFrame response = await ReadFrameAsync(transport);
         AssertEqual(MessageType.Nack, response.MessageType);
-        AssertEqual(request.Sequence, response.Sequence);
+        AssertEqual(Sequence, response.Sequence);
         AssertSpanEqual<byte>(
-            [UnknownRequestId, (byte)ResultCode.InvalidCommand, (byte)DeviceOperatingState.Idle],
+            [
+                UnknownRequestId,
+                (byte)ResultCode.InvalidCommand,
+                (byte)DeviceOperatingState.Idle
+            ],
             response.Payload.Span);
         await transport.DisconnectAsync(CancellationToken.None);
     }
@@ -838,7 +927,7 @@ internal static class Program
             _state = state;
         }
 
-        public Task WaitForSuppressedCommandAsync(
+        public Task<bool> WaitForSuppressedCommandAsync(
             CancellationToken cancellationToken)
         {
             if (!_suppressResponseOnceFor.HasValue)

@@ -163,24 +163,34 @@ public sealed class FrameDecoder
             }
 
             byte rawMessageType = _buffer[ProtocolConstants.MessageTypeOffset];
-            if (!MessageTypeValidator.IsDefined(rawMessageType) &&
-                !_allowUnknownMessageTypes)
+            bool isKnownMessageType =
+                MessageTypeValidator.IsDefined(rawMessageType);
+
+            if (!isKnownMessageType)
             {
                 Interlocked.Increment(ref _unknownMessageTypeCount);
-                Interlocked.Increment(ref _formatErrorCount);
-                Discard(totalLength, countAsDiscarded: false);
-                continue;
+
+                if (!_allowUnknownMessageTypes)
+                {
+                    Interlocked.Increment(ref _formatErrorCount);
+                    Discard(totalLength, countAsDiscarded: false);
+                    continue;
+                }
             }
 
             byte version = _buffer[ProtocolConstants.VersionOffset];
-            var messageType = (MessageType)rawMessageType;
             ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(
                 _buffer.AsSpan(ProtocolConstants.SequenceOffset, sizeof(ushort)));
             byte[] payload = _buffer
                 .AsSpan(ProtocolConstants.PayloadOffset, payloadLength)
                 .ToArray();
 
-            frame = new ProtocolFrame(version, messageType, sequence, payload);
+            frame = ProtocolFrame.CreateDecoded(
+                version,
+                rawMessageType,
+                sequence,
+                payload,
+                allowUnknownMessageType: !isKnownMessageType);
             Discard(totalLength, countAsDiscarded: false);
             return true;
         }

@@ -66,7 +66,7 @@ jobs:
 
       - name: Upload protocol-test evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: protocol-test-evidence
           path: protocol-test-output.txt

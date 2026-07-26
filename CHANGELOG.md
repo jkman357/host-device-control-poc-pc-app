@@ -2,6 +2,25 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.6 - 2026-07-26
+
+- replaced the free-form baud-rate text field with a non-editable selector;
+- added the supported rates 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600;
+- retained 115200 as the default baud rate;
+- centralized the supported-rate authority in `SerialTransportOptions` so UI choices and transport validation use the same immutable list;
+- rejected unsupported baud rates before opening the Windows serial port;
+- displayed the selected COM port and baud rate in the connection status;
+- added executable tests for exact baud-rate ordering, the default, acceptance of every listed value, and rejection of unsupported values;
+- documented driver, adapter, and MCU support as a physical bring-up responsibility.
+
+## 0.3.5 - 2026-07-26
+
+- preserved unknown raw command IDs only inside the Fake Node's explicitly permissive decoder after frame length and CRC validation;
+- retained strict unknown-ID rejection in the public `ProtocolFrame` constructor and normal PC receive decoder;
+- changed the unknown-command test to inject a valid wire frame with message ID `0x7F` and recomputed CRC;
+- verified the Fake Node returns `INVALID_COMMAND` while preserving the original unknown request ID;
+- updated the artifact upload action and removed the test helper's avoidable interface-return analyzer warning.
+
 ## 0.3.4 - 2026-07-26
 
 - made cancellation recovery tests deterministic by waiting until the scripted Node has applied the command before cancelling the host operation;

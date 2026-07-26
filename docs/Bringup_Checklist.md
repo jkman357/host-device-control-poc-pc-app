@@ -14,6 +14,7 @@
 
 - [ ] `HostDeviceControl.App` is the startup project and launches without binding exceptions.
 - [ ] Transport, COM port, and baud controls are disabled while connected.
+- [ ] Baud selector contains exactly 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default selection is 115200.
 - [ ] Button enablement follows Disconnected/Ready/Streaming states.
 - [ ] Error text is visible without relying only on color.
 - [ ] Operational log remains responsive and bounded during a sustained stream.
@@ -31,7 +32,8 @@
 
 ## Sustained physical transport
 
-- [ ] Record COM port, baud, board identity, firmware commit/version, and test duration.
+- [ ] Record COM port, selected baud, board identity, firmware commit/version, and test duration.
+- [ ] Confirm the USB-UART/VCP adapter, Windows driver, and MCU UART clock configuration support the selected baud before sustained testing.
 - [ ] Stream 200 Hz telemetry for the approved duration.
 - [ ] Record frame/sample counts, CRC errors, format errors, unknown IDs, lost samples, UI drops, and recorder drops.
 - [ ] Verify CSV monotonic sample counter/device tick and record any gaps.

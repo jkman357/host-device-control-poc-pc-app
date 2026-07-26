@@ -27,8 +27,10 @@ and drift validation; they do not override the system repository.
 - unmatched response sequences are rejected as unmatched diagnostics;
 - partial frames are discarded after 250 ms;
 - command timeouts are 1000 ms, except STOP_STREAM at 1500 ms;
-- the fake Node returns INVALID_COMMAND for a decodable unknown request ID and
-  implements the same state transition and ACK/NACK payload rules.
+- the normal PC decoder and public frame constructor reject unknown message IDs;
+- the explicitly permissive fake-Node decoder may retain a CRC-valid unknown raw
+  request ID only long enough to return INVALID_COMMAND with that original ID;
+- the fake Node implements the same state transition and ACK/NACK payload rules.
 
 ## Evidence boundary
 
