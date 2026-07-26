@@ -4,7 +4,7 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
 ## Candidate assessment
 
-The 0.3.9 candidate implements the PC-side behavior of the external system protocol
+The 0.3.10 candidate implements the PC-side behavior of the external system protocol
 v0.1.0 pinned in `protocol/authority-lock.yaml`. The local YAML is validated by exact
 SHA-256, and derived C# message IDs, result codes, Node states, status flags, framing
 constants, timeouts, stream limits, and normative vectors are checked for drift.
@@ -17,6 +17,7 @@ counters, fault-injection tests, and repository validation.
 ## Evidence already represented by this candidate
 
 - static protocol authority/provenance validation;
+- bounded initial GET_DEVICE_INFO retry after one timeout, without changing the wire contract or per-command timeout;
 - exact PING and ACK normative vector checks;
 - PC encoder/decoder and payload codec coverage, including strict/permissive unknown-ID boundaries;
 - idle/streaming state and ACK/NACK state handling;

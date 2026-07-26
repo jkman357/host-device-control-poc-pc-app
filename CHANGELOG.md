@@ -2,6 +2,15 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.10 - 2026-07-26
+
+- retained the physically exercised `183b38b` runtime and protocol baseline, including 460800-baud / 200-Hz operation;
+- added one bounded retry when the initial GET_DEVICE_INFO request times out;
+- kept the authoritative 1000 ms timeout for each GET_DEVICE_INFO attempt and did not change the wire contract;
+- did not retry caller cancellation, protocol rejection, PING, or normal runtime commands;
+- added deterministic regression coverage that suppresses the first DEVICE_INFO response and requires the second attempt to complete the handshake;
+- updated candidate provenance and evidence headers without adopting the later v0.4.0 protocol changes.
+
 ## 0.3.9 - 2026-07-26
 
 - restored contribution guidance requiring system-repository authority updates before local wire-behavior changes;

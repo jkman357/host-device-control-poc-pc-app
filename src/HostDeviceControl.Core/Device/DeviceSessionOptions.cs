@@ -8,8 +8,8 @@ using HostDeviceControl.Core.Protocol;
 namespace HostDeviceControl.Core.Device;
 
 /// <summary>
-/// Defines bounded timeout and buffer policies for one device session.
-/// Defaults are derived from the shared Project Protocol.
+/// Defines protocol-derived timeouts and project-local bounded retry and
+/// buffer policies for one device session.
 /// </summary>
 public sealed class DeviceSessionOptions
 {
@@ -17,6 +17,11 @@ public sealed class DeviceSessionOptions
 
     public TimeSpan GetDeviceInfoTimeout { get; init; } =
         TimeSpan.FromMilliseconds(ProtocolConstants.GetDeviceInfoTimeoutMs);
+
+    public int GetDeviceInfoAttemptCount { get; init; } = 2;
+
+    public TimeSpan GetDeviceInfoRetryDelay { get; init; } =
+        TimeSpan.FromMilliseconds(250);
 
     public TimeSpan CommandTimeout { get; init; } =
         TimeSpan.FromMilliseconds(ProtocolConstants.CommandDefaultTimeoutMs);
@@ -35,6 +40,10 @@ public sealed class DeviceSessionOptions
     public void Validate()
     {
         ValidatePositiveTimeout(GetDeviceInfoTimeout, nameof(GetDeviceInfoTimeout));
+        ValidateGetDeviceInfoAttemptCount();
+        ValidateNonNegativeTimeout(
+            GetDeviceInfoRetryDelay,
+            nameof(GetDeviceInfoRetryDelay));
         ValidatePositiveTimeout(CommandTimeout, nameof(CommandTimeout));
         ValidatePositiveTimeout(StopStreamTimeout, nameof(StopStreamTimeout));
         ValidatePositiveTimeout(PartialFrameTimeout, nameof(PartialFrameTimeout));
@@ -52,7 +61,34 @@ public sealed class DeviceSessionOptions
         }
     }
 
-    private static void ValidatePositiveTimeout(TimeSpan timeout, string propertyName)
+    private void ValidateGetDeviceInfoAttemptCount()
+    {
+        if ((GetDeviceInfoAttemptCount < 1) ||
+            (GetDeviceInfoAttemptCount > 3))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(GetDeviceInfoAttemptCount),
+                GetDeviceInfoAttemptCount,
+                "GET_DEVICE_INFO attempt count must be between 1 and 3.");
+        }
+    }
+
+    private static void ValidateNonNegativeTimeout(
+        TimeSpan timeout,
+        string propertyName)
+    {
+        if ((timeout < TimeSpan.Zero) || (timeout == Timeout.InfiniteTimeSpan))
+        {
+            throw new ArgumentOutOfRangeException(
+                propertyName,
+                timeout,
+                "Timeout must be finite and non-negative.");
+        }
+    }
+
+    private static void ValidatePositiveTimeout(
+        TimeSpan timeout,
+        string propertyName)
     {
         if ((timeout <= TimeSpan.Zero) || (timeout == Timeout.InfiniteTimeSpan))
         {

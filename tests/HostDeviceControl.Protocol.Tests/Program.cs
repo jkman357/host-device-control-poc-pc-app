@@ -48,7 +48,11 @@ internal static class Program
         Run("Error report codec", TestErrorReportCodec);
         Run("Non-finite telemetry rejection", TestNonFiniteTelemetryRejection);
         Run("Bounded UI buffer policy", TestBoundedDropOldestBuffer);
+        Run("Handshake retry policy validation", TestHandshakeRetryPolicyValidation);
         await RunAsync("Fake device happy path", TestFakeDeviceSessionAsync);
+        await RunAsync(
+            "GET_DEVICE_INFO startup retry",
+            TestGetDeviceInfoStartupRetryAsync);
         await RunAsync("Fake invalid-length NACK", TestFakeInvalidLengthNackAsync);
         await RunAsync("Fake unsupported-version NACK", TestFakeUnsupportedVersionNackAsync);
         await RunAsync("Fake unknown-command NACK", TestFakeUnknownCommandNackAsync);
@@ -85,18 +89,18 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl engineering test evidence");
-        Console.WriteLine("Software candidate: 0.3.9");
+        Console.WriteLine("Software candidate: 0.3.10");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "ec83252f31a82a73b1f621378882361fd06fa941");
+            "183b38b9a125968aecc695018b36d7d41499d1ca");
         Console.WriteLine("Protocol authority: host-device-control-poc-system@e4aa40b v0.1.0");
         Console.WriteLine($"Runtime: {Environment.Version}");
         Console.WriteLine($"OS: {Environment.OSVersion}");
-        Console.WriteLine("Simulator: bounded fake-device profile v0.3.9");
+        Console.WriteLine("Simulator: bounded fake-device profile v0.3.10");
         Console.WriteLine(
             "Evidence scope: software protocol/concurrency behavior only; " +
             "not physical hardware validation.");
@@ -328,6 +332,25 @@ internal static class Program
         AssertSpanEqual<int>([2, 3, 4], values.ToArray());
     }
 
+    private static void TestHandshakeRetryPolicyValidation()
+    {
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => new DeviceSessionOptions
+            {
+                GetDeviceInfoAttemptCount = 0
+            }.Validate());
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => new DeviceSessionOptions
+            {
+                GetDeviceInfoAttemptCount = 4
+            }.Validate());
+        AssertThrows<ArgumentOutOfRangeException>(
+            () => new DeviceSessionOptions
+            {
+                GetDeviceInfoRetryDelay = TimeSpan.FromMilliseconds(-1)
+            }.Validate());
+    }
+
     private static async Task TestFakeDeviceSessionAsync()
     {
         await using var transport = new FakeDeviceTransport();
@@ -335,6 +358,34 @@ internal static class Program
         await CollectSamplesAsync(session, 10);
         AssertEqual(0L, session.CrcErrorCount);
         AssertEqual(0L, session.LostSampleCount);
+    }
+
+    private static async Task TestGetDeviceInfoStartupRetryAsync()
+    {
+        await using var transport = new ScriptedDeviceTransport(
+            suppressResponseOnceFor: MessageType.GetDeviceInfo);
+        var sessionOptions = new DeviceSessionOptions
+        {
+            GetDeviceInfoTimeout = TimeSpan.FromMilliseconds(
+                TestCommandTimeoutMilliseconds),
+            GetDeviceInfoAttemptCount = 2,
+            GetDeviceInfoRetryDelay = TimeSpan.Zero,
+            CommandTimeout = TimeSpan.FromMilliseconds(
+                RecoveryTestCommandTimeoutMilliseconds),
+            StopStreamTimeout = TimeSpan.FromMilliseconds(
+                RecoveryTestStopTimeoutMilliseconds),
+            ReceiveLoopShutdownTimeout = TimeSpan.FromMilliseconds(
+                TestShutdownTimeoutMilliseconds),
+            ReceiveBufferSizeBytes = TestReceiveBufferSizeBytes
+        };
+
+        await using var session = new DeviceSession(transport, sessionOptions);
+        await session.ConnectAsync(CancellationToken.None);
+
+        AssertEqual(DeviceSessionState.Ready, session.State);
+        AssertEqual(DeviceOperatingState.Idle, session.DeviceState);
+        AssertNotNull(session.DeviceInfo);
+        AssertEqual(2, transport.GetDeviceInfoRequestCount);
     }
 
     private static async Task TestFakeInvalidLengthNackAsync()
@@ -857,6 +908,7 @@ internal static class Program
         private readonly TaskCompletionSource<bool> _suppressedCommandApplied =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private DeviceOperatingState _state;
+        private int _getDeviceInfoRequestCount;
         private bool _suppressedResponseConsumed;
         private bool _disposed;
 
@@ -874,6 +926,9 @@ internal static class Program
         }
 
         public bool IsConnected { get; private set; }
+
+        public int GetDeviceInfoRequestCount =>
+            Volatile.Read(ref _getDeviceInfoRequestCount);
 
         public void SetAuthoritativeState(DeviceOperatingState state)
         {
@@ -938,6 +993,11 @@ internal static class Program
             {
                 throw new ProtocolException(
                     "Scripted transport received an incomplete request.");
+            }
+
+            if (request.MessageType == MessageType.GetDeviceInfo)
+            {
+                Interlocked.Increment(ref _getDeviceInfoRequestCount);
             }
 
             ProtocolFrame response = CreateResponse(request);

@@ -12,10 +12,10 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <WarningLevel>7</WarningLevel>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <Version>0.3.9</Version>
-    <AssemblyVersion>0.3.9.0</AssemblyVersion>
-    <FileVersion>0.3.9.0</FileVersion>
-    <InformationalVersion>0.3.9-authority-guidance-analyzer-cleanup-candidate</InformationalVersion>
+    <Version>0.3.10</Version>
+    <AssemblyVersion>0.3.10.0</AssemblyVersion>
+    <FileVersion>0.3.10.0</FileVersion>
+    <InformationalVersion>0.3.10-initial-handshake-retry-candidate</InformationalVersion>
     <Authors>Ray Yang</Authors>
     <Copyright>Copyright © 2026 Ray Yang. All rights reserved.</Copyright>
     <RepositoryUrl>https://github.com/jkman357/host-device-control-poc-pc-app</RepositoryUrl>

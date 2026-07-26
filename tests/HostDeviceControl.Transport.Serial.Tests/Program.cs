@@ -42,14 +42,14 @@ internal static class Program
     private static void PrintEvidenceHeader()
     {
         Console.WriteLine("HostDeviceControl serial transport test evidence");
-        Console.WriteLine("Software candidate: 0.3.9");
+        Console.WriteLine("Software candidate: 0.3.10");
         string testedCommit =
             Environment.GetEnvironmentVariable("GITHUB_SHA") ??
             "uncommitted-local-package";
         Console.WriteLine($"Tested commit: {testedCommit}");
         Console.WriteLine(
             "Implementation base: " +
-            "ec83252f31a82a73b1f621378882361fd06fa941");
+            "183b38b9a125968aecc695018b36d7d41499d1ca");
         Console.WriteLine(
             "Transport profile: pending system-authority proposal v1");
         Console.WriteLine($"Runtime: {Environment.Version}");

@@ -140,13 +140,9 @@ public sealed class DeviceSession : IAsyncDisposable
             _receiveTask = ReceiveLoopAsync(generation, receiveToken);
 
             SetState(DeviceSessionState.Handshaking);
-            ProtocolFrame response = await SendRequestAsync(
+            ProtocolFrame response = await GetDeviceInfoWithRetryAsync(
                 generation,
-                MessageType.GetDeviceInfo,
-                [],
-                _options.GetDeviceInfoTimeout,
-                cancellationToken,
-                MessageType.DeviceInfo).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
 
             DeviceInfo = PayloadCodec.DecodeDeviceInfo(response.Payload.Span);
 
@@ -396,6 +392,46 @@ public sealed class DeviceSession : IAsyncDisposable
         {
             _lifecycleGate.Release();
         }
+    }
+
+    private async Task<ProtocolFrame> GetDeviceInfoWithRetryAsync(
+        long generation,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 1;
+             attempt <= _options.GetDeviceInfoAttemptCount;
+             attempt++)
+        {
+            try
+            {
+                return await SendRequestAsync(
+                    generation,
+                    MessageType.GetDeviceInfo,
+                    [],
+                    _options.GetDeviceInfoTimeout,
+                    cancellationToken,
+                    MessageType.DeviceInfo).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+                when (attempt < _options.GetDeviceInfoAttemptCount)
+            {
+                PublishDiagnostic(
+                    $"GET_DEVICE_INFO attempt {attempt} timed out; " +
+                    "retrying initial handshake.");
+
+                if (_options.GetDeviceInfoRetryDelay > TimeSpan.Zero)
+                {
+                    await Task.Delay(
+                            _options.GetDeviceInfoRetryDelay,
+                            _timeProvider,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            "GET_DEVICE_INFO retry policy completed without a result.");
     }
 
     private async Task<ProtocolFrame> SendRequestAsync(

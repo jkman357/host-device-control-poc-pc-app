@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.9 authority-guidance and analyzer-cleanup candidate**, based on PC application commit
-`ec83252f31a82a73b1f621378882361fd06fa941`.
+**v0.3.10 initial-handshake robustness candidate**, based on the physically exercised PC application commit
+`183b38b9a125968aecc695018b36d7d41499d1ca`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -41,7 +41,7 @@ PC/MCU/adapter/clock interoperability evidence before promotion. See
 - DEVICE_INFO, DEVICE_STATUS, TELEMETRY_SAMPLE, and ERROR_REPORT decoding;
 - non-zero host command sequences and independent unsolicited message sequences;
 - validated ACK/NACK request correlation before authoritative Node-state updates;
-- connection handshake and explicit PING state synchronization;
+- connection handshake with one bounded GET_DEVICE_INFO timeout retry and explicit PING state synchronization;
 - independently bounded authoritative-state recovery after ambiguous START/STOP cancellation or timeout;
 - duplicate direct-response suppression and unmatched-sequence diagnostics;
 - 1000 ms default command timeout, 1500 ms STOP_STREAM timeout, and 250 ms partial-frame timeout;
@@ -67,7 +67,7 @@ All remain **Draft for Review**. Project-local adoption and deviations are recor
 
 ## Architecture highlights
 
-- transport-independent, generation-owned `DeviceSession`;
+- transport-independent, generation-owned `DeviceSession` with a bounded initial GET_DEVICE_INFO retry;
 - protocol and Node state separated from WPF presentation state;
 - bounded receive, pending-command, UI telemetry, diagnostic, and recorder work;
 - baud-aware acquisition: 200 Hz at 115200 baud or faster, automatically reduced at lower stream-capable rates, with a bounded 50 ms WPF presentation batch;
@@ -127,7 +127,9 @@ delivery, and WPF rendering.
    same baud rate.
 5. Connect, verify DEVICE_INFO, and start telemetry. The application uses 5000 us at
    115200 baud and faster, selects a safer interval at 9600 through 57600, and
-   disables streaming at command-only rates.
+   disables streaming at command-only rates. If the first GET_DEVICE_INFO request
+   times out, the application waits 250 ms and retries once before failing the
+   connection.
 6. Execute and retain the checks in `docs/Bringup_Checklist.md`.
 
 Supported selections:

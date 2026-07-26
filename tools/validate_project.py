@@ -63,8 +63,46 @@ def validate_authority_guidance() -> list[str]:
         errors.append('CONTRIBUTING.md incorrectly treats the local mirror as editable authority')
     return errors
 
+
+def validate_handshake_retry_policy() -> list[str]:
+    errors=[]
+    checks={
+        'src/HostDeviceControl.Core/Device/DeviceSessionOptions.cs':[
+            'public int GetDeviceInfoAttemptCount { get; init; } = 2;',
+            'public TimeSpan GetDeviceInfoRetryDelay { get; init; } =',
+            'TimeSpan.FromMilliseconds(250);',
+            'GET_DEVICE_INFO attempt count must be between 1 and 3.',
+        ],
+        'src/HostDeviceControl.Core/Device/DeviceSession.cs':[
+            'GetDeviceInfoWithRetryAsync(',
+            'catch (TimeoutException)',
+            'attempt < _options.GetDeviceInfoAttemptCount',
+            '_options.GetDeviceInfoRetryDelay',
+            'retrying initial handshake.',
+        ],
+        'tests/HostDeviceControl.Protocol.Tests/Program.cs':[
+            'GET_DEVICE_INFO startup retry',
+            'suppressResponseOnceFor: MessageType.GetDeviceInfo',
+            'AssertEqual(2, transport.GetDeviceInfoRequestCount);',
+            'GetDeviceInfoAttemptCount = 0',
+            'GetDeviceInfoAttemptCount = 4',
+        ],
+    }
+    for name, fragments in checks.items():
+        text=(ROOT/name).read_text(encoding='utf-8')
+        for fragment in fragments:
+            if fragment not in text:
+                errors.append(f'{name} is missing handshake retry control: {fragment}')
+    return errors
+
 def main() -> int:
-    errors=validate_required_files()+validate_xml()+validate_line_endings()+validate_authority_guidance()
+    errors=(
+        validate_required_files()
+        +validate_xml()
+        +validate_line_endings()
+        +validate_authority_guidance()
+        +validate_handshake_retry_policy()
+    )
     if run('validate_protocol_contract.py') != 0: errors.append('protocol contract validator failed')
     if run('validate_source_headers.py') != 0: errors.append('source-policy validator failed')
     if errors:
