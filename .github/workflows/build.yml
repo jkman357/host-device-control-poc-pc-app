@@ -41,41 +41,55 @@ jobs:
       - name: Build
         run: dotnet build HostDeviceControl.Poc.sln --configuration Release --no-restore
 
-      - name: Engineering protocol tests
-        id: engineering_protocol_tests
+      - name: Engineering tests
+        id: engineering_tests
         continue-on-error: true
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
           $PSNativeCommandUseErrorActionPreference = $false
-          $outputPath = "protocol-test-output.txt"
-          $output = & dotnet run `
-            --project tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj `
-            --configuration Release `
-            --no-build 2>&1
-          $testExitCode = $LASTEXITCODE
-          @($output) | ForEach-Object { "$_" } |
-            Tee-Object -FilePath $outputPath
+          $failed = $false
+          $testProjects = @(
+            @{ Name = "Protocol"; Project = "tests/HostDeviceControl.Protocol.Tests/HostDeviceControl.Protocol.Tests.csproj"; Output = "protocol-test-output.txt" },
+            @{ Name = "Serial transport"; Project = "tests/HostDeviceControl.Transport.Serial.Tests/HostDeviceControl.Transport.Serial.Tests.csproj"; Output = "serial-transport-test-output.txt" }
+          )
 
-          "## Engineering protocol tests" | Add-Content $env:GITHUB_STEP_SUMMARY
-          '```text' | Add-Content $env:GITHUB_STEP_SUMMARY
-          Get-Content $outputPath | Add-Content $env:GITHUB_STEP_SUMMARY
-          '```' | Add-Content $env:GITHUB_STEP_SUMMARY
+          foreach ($testProject in $testProjects) {
+            $output = & dotnet run `
+              --project $testProject.Project `
+              --configuration Release `
+              --no-build 2>&1
+            $testExitCode = $LASTEXITCODE
+            @($output) | ForEach-Object { "$_" } |
+              Tee-Object -FilePath $testProject.Output
 
-          exit $testExitCode
+            "## $($testProject.Name) engineering tests" | Add-Content $env:GITHUB_STEP_SUMMARY
+            '```text' | Add-Content $env:GITHUB_STEP_SUMMARY
+            Get-Content $testProject.Output | Add-Content $env:GITHUB_STEP_SUMMARY
+            '```' | Add-Content $env:GITHUB_STEP_SUMMARY
 
-      - name: Upload protocol-test evidence
+            if ($testExitCode -ne 0) {
+              Write-Output "::error title=$($testProject.Name) engineering tests failed::See the job summary and engineering-test-evidence artifact."
+              $failed = $true
+            }
+          }
+
+          if ($failed) { exit 1 }
+
+      - name: Upload engineering-test evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: protocol-test-evidence
-          path: protocol-test-output.txt
+          name: engineering-test-evidence
+          path: |
+            protocol-test-output.txt
+            serial-transport-test-output.txt
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Enforce protocol-test result
-        if: steps.engineering_protocol_tests.outcome == 'failure'
+      - name: Enforce engineering-test result
+        if: steps.engineering_tests.outcome == 'failure'
         shell: pwsh
         run: |
-          Write-Error "Engineering protocol tests failed. See the job summary and protocol-test-evidence artifact."
+          Write-Error "Engineering tests failed. See the job summary and engineering-test-evidence artifact."
           exit 1

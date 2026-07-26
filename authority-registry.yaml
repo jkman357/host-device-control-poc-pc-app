@@ -1,11 +1,11 @@
 # Copyright © 2026 Ray Yang. All rights reserved.
 # No license is granted. See LICENSE and NOTICE.md.
 
-registry_version: 3
+registry_version: 4
 project: host-device-control-poc-pc-app
-candidate_version: 0.3.6
-status: system_protocol_alignment_candidate
-implementation_base_commit: 19bac103c6468ec50d15239ad1feed12e44541d4
+candidate_version: 0.3.7
+status: transport_profile_change_candidate_pending_system_authority
+implementation_base_commit: cf229be58b4ae15969ef447083d9c5982ff19ee7
 
 project_protocol_authority:
   repository: host-device-control-poc-system
@@ -19,6 +19,13 @@ project_protocol_authority:
   local_mirror: protocol/protocol.yaml
   local_lock: protocol/authority-lock.yaml
   rule: external_project_authority_precedes_implementation
+
+transport_profile_proposal:
+  path: protocol/transport-profile-proposal.yaml
+  status: pending_system_authority_update
+  sha256: 6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310
+  implementation_base_commit: cf229be58b4ae15969ef447083d9c5982ff19ee7
+  rule: proposal_cannot_override_pinned_system_protocol
 
 external_authority_source:
   repository: host-device-control-framework
@@ -46,6 +53,8 @@ external_authority_source:
       role: testing_topic_authority
 
 local_authorities:
+  - path: protocol/transport-profile-proposal.yaml
+    authority: pending_transport_profile_change_proposal
   - path: docs/Engineering_Rules_Adoption.md
     authority: project_authority_adoption
   - path: docs/Project_Profile.md
@@ -59,6 +68,7 @@ precedence:
   - host-device-control-poc-system/protocol/protocol.yaml
   - protocol/authority-lock.yaml
   - protocol/protocol.yaml
+  - protocol/transport-profile-proposal.yaml
   - docs/Engineering_Rules_Adoption.md
   - docs/Project_Profile.md
   - docs/Architecture.md
@@ -68,6 +78,7 @@ precedence:
 human_approval_required_for:
   - protocol_authority_commit_change
   - protocol_mirror_hash_change
+  - transport_profile_proposal_promotion
   - deviation_change
   - protocol_version_change
   - message_id_change

@@ -1,0 +1,43 @@
+# Copyright © 2026 Ray Yang. All rights reserved.
+# No license is granted. See LICENSE and NOTICE.md.
+
+proposal_version: 1
+status: pending_system_authority_update
+scope: serial_transport_profile
+upstream_authority:
+  repository: host-device-control-poc-system
+  path: protocol/protocol.yaml
+  authority_commit: e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679
+  current_fixed_baud_rate_bps: 115200
+
+proposed_transport_profile:
+  allowed_baud_rates_bps:
+    - 1200
+    - 2400
+    - 4800
+    - 9600
+    - 19200
+    - 38400
+    - 57600
+    - 115200
+    - 230400
+    - 460800
+    - 921600
+  default_baud_rate_bps: 115200
+  data_bits: 8
+  parity: none
+  stop_bits: 1
+  flow_control: none
+
+stream_capacity_policy:
+  bits_per_uart_byte: 10
+  maximum_line_utilization_percent: 80
+  telemetry_frame_size_bytes: 24
+  preferred_stream_interval_us: 5000
+  maximum_stream_interval_us: 60000
+  behavior: auto_increase_interval_or_reject_streaming
+
+notes:
+  - The pinned upstream protocol mirror remains unchanged until human approval and a system-repository commit exist.
+  - Rates that cannot carry one telemetry frame within the maximum protocol interval at the utilization limit remain command-only.
+  - PC, MCU, adapter, and clock support must be verified for every enabled physical rate.

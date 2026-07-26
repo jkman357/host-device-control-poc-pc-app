@@ -46,3 +46,15 @@
 - [ ] Label Fake Device results as simulator evidence.
 - [ ] Label physical NUCLEO/VCP results as target integration evidence.
 - [ ] Do not claim safety, product, clinical, or regulatory validation from this PoC checklist.
+
+
+## Baud-rate and stream-capacity checks
+
+- Confirm the selected rate exists in the pending transport-profile proposal.
+- Confirm PC driver, adapter/VCP, MCU clock, UART divisor, and both endpoints use the
+  same rate.
+- Treat 1200, 2400, and 4800 baud as command-only under the 80% policy.
+- Confirm the UI reports the expected interval/frequency for 9600 through 57600.
+- Confirm 115200 and faster retain 5000 us / 200 Hz.
+- Retain sustained frame, CRC, loss, reconnect, and stop evidence for each rate that
+  is proposed for system-authority promotion.

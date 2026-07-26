@@ -2,6 +2,16 @@
 
 Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 
+## 0.3.7 - 2026-07-26
+
+- preserved the exact upstream protocol mirror and added a separate pending selectable-baud transport-profile proposal;
+- added CI validation for proposal baud rates, default, framing capacity assumptions, telemetry frame size, and stream interval constants;
+- enforced an 80% UART line-utilization ceiling, automatically increasing the stream interval when required;
+- classified 1200, 2400, and 4800 baud as command-only because they cannot carry a telemetry frame within the 60000 us protocol maximum under the capacity policy;
+- displayed serial stream capability in the WPF UI and disabled Start Stream for command-only selections;
+- returned protocol/core engineering tests to portable `net8.0` and created a separate Windows serial transport test executable;
+- removed the remaining CA1806 test warning and retained both test outputs as CI evidence.
+
 ## 0.3.6 - 2026-07-26
 
 - replaced the free-form baud-rate text field with a non-editable selector;

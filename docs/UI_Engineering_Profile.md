@@ -9,3 +9,12 @@ Telemetry arrives independently of UI rendering. A bounded drop-oldest buffer pr
 Operational errors are converted to user-facing status plus bounded logs. Framework-required `async void` event boundaries catch exceptions. Shutdown is cancellable, bounded, and retryable rather than silently abandoning work.
 
 The main controls include automation names, the operational log uses recycling virtualization, and UI colors are not the sole carrier of connection or error state. This PoC is English-only and has not completed formal localization or automated accessibility verification.
+
+
+## Baud capability presentation
+
+The Baud selector remains non-editable and locked while connected. A read-only
+capability label shows either the calculated maximum telemetry frequency or
+`command-only`. The Start Stream command is disabled when the selected serial rate
+cannot fit one telemetry frame within the protocol maximum interval under the 80%
+line-utilization policy.

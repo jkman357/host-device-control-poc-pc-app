@@ -5,14 +5,14 @@ Copyright © 2026 Ray Yang. All rights reserved. No license is granted.
 ## Identity and scope
 
 - Repository: `host-device-control-poc-pc-app`
-- Candidate version: 0.3.6
-- Implementation base: `19bac103c6468ec50d15239ad1feed12e44541d4`
+- Candidate version: 0.3.7
+- Implementation base: `cf229be58b4ae15969ef447083d9c5982ff19ee7`
 - Role: single-Node Windows Coordinator PoC
 - Device profile: NUCLEO-F446RE firmware PoC
 - Protocol authority: `host-device-control-poc-system/protocol/protocol.yaml` v0.1.0 at `e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679`; local exact mirror in `protocol/protocol.yaml`
 - Deployment: engineering workstation; not production or clinical software
 - Supported transports: bounded Fake byte stream and Windows SerialPort/VCP
-- Serial profile: operator-selectable 8-N-1, no-flow-control baud rates of 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default 115200
+- Serial profile proposal: operator-selectable 8-N-1, no-flow-control baud rates of 1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, and 921600; default 115200; pending system-authority approval
 - Storage model: operator-selected local CSV file plus bounded in-memory UI/log snapshots
 
 ## C# and platform profile
@@ -63,7 +63,7 @@ This PoC assumes a locally connected engineering device in a controlled environm
 
 ## Deviation records and open controls
 
-These records are **pending human approval** for the 0.3.6 candidate. They do not become accepted defaults merely by being documented.
+These records are **pending human approval** for the 0.3.7 candidate. They do not become accepted defaults merely by being documented.
 
 ### DEV-001 — SerialPort open/close cancellation
 
@@ -131,6 +131,26 @@ These records are **pending human approval** for the 0.3.6 candidate. They do no
 - Approver: pending Ray Yang review.
 - Review condition: automation required before product-grade UI baseline.
 
+
+### DEV-007 — Selectable UART transport profile pending upstream authority
+
+- Rule/section: project protocol authority and single-source-of-truth governance.
+- Reason: the PC application must expose eleven requested rates before the system
+  repository has an approved transport-profile update.
+- Scope: serial-port selection and baud-aware stream capacity only; wire framing and
+  message semantics remain unchanged.
+- Risk: selecting a non-115200 rate without a matching MCU build violates the pinned
+  upstream transport profile and prevents communication.
+- Compensating control: preserve the exact upstream mirror, record the change in
+  `protocol/transport-profile-proposal.yaml`, keep 115200 as the default, validate the
+  proposal against C#, display command-only/stream capability, and require matching
+  MCU/hardware configuration.
+- Verification: CI proposal-to-C# drift check, serial capacity tests, and physical
+  interoperability evidence for each promoted rate.
+- Approver: pending Ray Yang review and system-repository authority update.
+- Review condition: close only after the system protocol commit, local mirror/hash, PC,
+  MCU, vectors/evidence, and human approval are synchronized.
+
 ## Conformance statement
 
-This repository is a **system-protocol-alignment candidate** and an engineering-rules-aligned candidate, not a certification or unconditional conformance claim. Acceptance requires a clean controlled Windows build, analyzer review, test execution, manual UI review, protocol cross-end validation, physical MCU validation, and human approval.
+This repository is a **transport-profile change candidate pending system-authority approval** and an engineering-rules-aligned candidate, not a certification or unconditional conformance claim. Acceptance requires a clean controlled Windows build, analyzer review, test execution, manual UI review, protocol cross-end validation, physical MCU validation, and human approval.

@@ -34,7 +34,7 @@ bounded transport bytes
 
 `DeviceSession` is the authority for PC connection lifecycle and request correlation, and it tracks the authoritative Node operating state reported by ACK/NACK and DEVICE_STATUS. After an ambiguous START_STREAM or STOP_STREAM cancellation, timeout, or malformed response, it performs an independently bounded PING before deciding whether the session is Ready, Streaming, or Faulted. The ViewModel displays that state and cannot directly write protocol bytes. A transport cannot interpret ACK/NACK, Node state, or telemetry meaning. The wire contract remains external to this repository and is consumed through the pinned protocol mirror.
 
-`SerialTransportOptions` owns the exact supported baud-rate set and validates every Serial transport instance. The ViewModel exposes that same read-only set to the non-editable WPF selector, so presentation and transport validation cannot drift. The selected rate is captured before opening the port and cannot be changed while a session is active.
+`SerialTransportOptions` owns the exact supported baud-rate set and validates every Serial transport instance. The ViewModel exposes that same read-only set to the non-editable WPF selector, so presentation and transport validation cannot drift. The selected rate is captured before opening the port and cannot be changed while a session is active. `SerialStreamCapacity` applies the pending transport proposal: it models 8-N-1 as 10 bits per byte, reserves 20% of the line, keeps the 5000 us preference when safe, increases the interval at lower rates, and rejects streaming when the result would exceed the protocol maximum interval.
 
 ## Connection generation
 

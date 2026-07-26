@@ -31,7 +31,7 @@ def validate_xml() -> list[str]:
     return errors
 
 def validate_required_files() -> list[str]:
-    required=['.gitattributes','authority-registry.yaml','docs/Engineering_Rules_Adoption.md','docs/Project_Profile.md','docs/Concurrency_Model.md','docs/UI_Engineering_Profile.md','docs/Testing_Strategy.md','docs/Fake_Device_Simulator_Profile.md','docs/Conformance_Assessment.md','protocol/authority-lock.yaml','protocol/protocol.yaml','protocol/test-vectors/protocol-v0.1.0-vectors.json']
+    required=['.gitattributes','authority-registry.yaml','docs/Engineering_Rules_Adoption.md','docs/Project_Profile.md','docs/Concurrency_Model.md','docs/UI_Engineering_Profile.md','docs/Testing_Strategy.md','docs/Fake_Device_Simulator_Profile.md','docs/Conformance_Assessment.md','protocol/authority-lock.yaml','protocol/protocol.yaml','protocol/transport-profile-proposal.yaml','protocol/test-vectors/protocol-v0.1.0-vectors.json']
     return [f'missing required file: {name}' for name in required if not (ROOT/name).is_file()]
 
 def main() -> int:

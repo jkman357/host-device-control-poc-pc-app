@@ -1,0 +1,13 @@
+<!-- Copyright © 2026 Ray Yang. All rights reserved. No license is granted. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>HostDeviceControl.Transport.Serial.Tests</AssemblyName>
+    <RootNamespace>HostDeviceControl.Transport.Serial.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\HostDeviceControl.Core\HostDeviceControl.Core.csproj" />
+    <ProjectReference Include="..\..\src\HostDeviceControl.Transport.Serial\HostDeviceControl.Transport.Serial.csproj" />
+  </ItemGroup>
+</Project>

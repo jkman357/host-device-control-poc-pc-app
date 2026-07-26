@@ -116,8 +116,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
                   _session.State != DeviceSessionState.Disconnected);
         StartStreamCommand = CreateAsyncCommand(
             StartStreamingAsync,
-            () => !_isShuttingDown &&
-                  _session?.State == DeviceSessionState.Ready);
+            CanStartStreaming);
         StopStreamCommand = CreateAsyncCommand(
             StopStreamingAsync,
             () => !_isShuttingDown &&
@@ -176,6 +175,7 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             {
                 OnPropertyChanged(nameof(IsSerialMode));
                 OnPropertyChanged(nameof(IsSerialConfigurationEditable));
+                OnPropertyChanged(nameof(StreamCapabilitySummary));
                 RaiseCommandStates();
             }
         }
@@ -204,7 +204,36 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
     public int SelectedBaudRate
     {
         get => _selectedBaudRate;
-        set => SetProperty(ref _selectedBaudRate, value);
+        set
+        {
+            if (SetProperty(ref _selectedBaudRate, value))
+            {
+                OnPropertyChanged(nameof(StreamCapabilitySummary));
+                RaiseCommandStates();
+            }
+        }
+    }
+
+    public string StreamCapabilitySummary
+    {
+        get
+        {
+            if (!IsSerialMode)
+            {
+                return "Stream: 200 Hz";
+            }
+
+            if (!SerialStreamCapacity.TrySelectStreamIntervalUs(
+                    SelectedBaudRate,
+                    ProtocolConstants.DefaultStreamIntervalUs,
+                    out ushort intervalUs))
+            {
+                return "Stream: command-only";
+            }
+
+            double frequencyHz = 1_000_000.0 / intervalUs;
+            return $"Stream: {frequencyHz:0.##} Hz max";
+        }
     }
 
     public string SessionState
@@ -372,7 +401,10 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             await session.ConnectAsync(cancellationToken);
 
             UpdateDeviceSummary();
-            StatusMessage = $"Connected. Device state: {session.DeviceState}.";
+            StatusMessage = IsSerialMode
+                ? $"Connected. Device state: {session.DeviceState}. " +
+                  $"{StreamCapabilitySummary}."
+                : $"Connected. Device state: {session.DeviceState}.";
         }
         catch (OperationCanceledException)
             when (cancellationToken.IsCancellationRequested)
@@ -464,10 +496,14 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
+            ushort intervalUs = GetSelectedStreamIntervalUs();
             await session.StartStreamingAsync(
-                ProtocolConstants.DefaultStreamIntervalUs,
+                intervalUs,
                 _applicationCancellation.Token);
-            StatusMessage = "Receiving 200 Hz telemetry.";
+            double frequencyHz = 1_000_000.0 / intervalUs;
+            StatusMessage =
+                $"Receiving {frequencyHz:0.##} Hz telemetry " +
+                $"({intervalUs} us interval).";
         }
         catch (OperationCanceledException)
             when (_applicationCancellation.IsCancellationRequested)
@@ -479,6 +515,42 @@ public sealed class MainViewModel : ObservableObject, IAsyncDisposable
             AddLog($"Start stream failed: {exception.Message}");
             StatusMessage = "Unable to start streaming.";
         }
+    }
+
+    private bool CanStartStreaming()
+    {
+        return !_isShuttingDown &&
+               _session?.State == DeviceSessionState.Ready &&
+               IsSelectedStreamConfigurationSupported();
+    }
+
+    private bool IsSelectedStreamConfigurationSupported()
+    {
+        return !IsSerialMode ||
+               SerialStreamCapacity.TrySelectStreamIntervalUs(
+                   SelectedBaudRate,
+                   ProtocolConstants.DefaultStreamIntervalUs,
+                   out _);
+    }
+
+    private ushort GetSelectedStreamIntervalUs()
+    {
+        if (!IsSerialMode)
+        {
+            return ProtocolConstants.DefaultStreamIntervalUs;
+        }
+
+        if (SerialStreamCapacity.TrySelectStreamIntervalUs(
+                SelectedBaudRate,
+                ProtocolConstants.DefaultStreamIntervalUs,
+                out ushort intervalUs))
+        {
+            return intervalUs;
+        }
+
+        throw new InvalidOperationException(
+            $"{SelectedBaudRate} baud is command-only under the configured " +
+            "UART capacity policy.");
     }
 
     private async Task StopStreamingAsync()

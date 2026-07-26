@@ -15,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PROTOCOL_PATH = ROOT / "protocol" / "protocol.yaml"
 AUTHORITY_LOCK_PATH = ROOT / "protocol" / "authority-lock.yaml"
+TRANSPORT_PROPOSAL_PATH = (
+    ROOT / "protocol" / "transport-profile-proposal.yaml"
+)
 VECTORS_PATH = (
     ROOT / "protocol" / "test-vectors" / "protocol-v0.1.0-vectors.json"
 )
@@ -37,11 +40,26 @@ STATUS_FLAGS_PATH = (
 CONSTANTS_PATH = (
     ROOT / "src" / "HostDeviceControl.Core" / "Protocol" / "ProtocolConstants.cs"
 )
+SERIAL_OPTIONS_PATH = (
+    ROOT
+    / "src"
+    / "HostDeviceControl.Transport.Serial"
+    / "SerialTransportOptions.cs"
+)
+SERIAL_CAPACITY_PATH = (
+    ROOT
+    / "src"
+    / "HostDeviceControl.Transport.Serial"
+    / "SerialStreamCapacity.cs"
+)
 EXPECTED_PROTOCOL_SHA256 = (
     "7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e"
 )
 EXPECTED_AUTHORITY_COMMIT = "e4aa40b4d5dfc3e7f878f82f5a89115de9fe3679"
-EXPECTED_IMPLEMENTATION_BASE = "19bac103c6468ec50d15239ad1feed12e44541d4"
+EXPECTED_TRANSPORT_PROPOSAL_SHA256 = (
+    "6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310"
+)
+EXPECTED_IMPLEMENTATION_BASE = "cf229be58b4ae15969ef447083d9c5982ff19ee7"
 
 
 def pascal_case(name: str) -> str:
@@ -120,6 +138,40 @@ def parse_int_scalar(protocol_text: str, key: str) -> int:
     )
     if match is None:
         raise ValueError(f"Missing protocol integer scalar: {key}")
+    return int(match.group(1))
+
+
+
+def parse_yaml_int_list(text: str, key: str) -> list[int]:
+    match = re.search(
+        rf"^\s*{re.escape(key)}:\s*\n(?P<body>(?:\s+-\s+\d+\s*\n)+)",
+        text,
+        re.MULTILINE,
+    )
+    if match is None:
+        raise ValueError(f"Missing YAML integer list: {key}")
+    return [int(value) for value in re.findall(r"-\s+(\d+)", match.group("body"))]
+
+
+def parse_csharp_int_array(text: str, name: str) -> list[int]:
+    match = re.search(
+        rf"{re.escape(name)}\s*=\s*\[(?P<body>.*?)\];",
+        text,
+        re.DOTALL,
+    )
+    if match is None:
+        raise ValueError(f"Missing C# integer array: {name}")
+    return [int(value) for value in re.findall(r"\b(\d+)\b", match.group("body"))]
+
+
+def parse_any_csharp_int_constant(text: str, name: str) -> int:
+    match = re.search(
+        rf"(?:public|private|internal)\s+const\s+(?:byte|ushort|int|long)\s+"
+        rf"{re.escape(name)}\s*=\s*(\d+)",
+        text,
+    )
+    if match is None:
+        raise ValueError(f"Missing C# integer constant: {name}")
     return int(match.group(1))
 
 
@@ -202,12 +254,150 @@ def validate_authority_lock(errors: list[str]) -> None:
         f"authority_commit: {EXPECTED_AUTHORITY_COMMIT}",
         f"sha256: {EXPECTED_PROTOCOL_SHA256}",
         f"base_commit: {EXPECTED_IMPLEMENTATION_BASE}",
+        f"sha256: {EXPECTED_TRANSPORT_PROPOSAL_SHA256}",
         "protocol_version: 0.1.0",
         "wire_version: 0x01",
     )
     for fragment in required_fragments:
         if fragment not in lock_text:
             errors.append(f"authority-lock.yaml is missing: {fragment}")
+
+
+
+def validate_transport_profile_proposal(
+    protocol_text: str,
+    constants_text: str,
+    errors: list[str],
+) -> None:
+    proposal_bytes = TRANSPORT_PROPOSAL_PATH.read_bytes()
+    proposal_text = proposal_bytes.decode("utf-8")
+    require_equal(
+        "transport proposal SHA-256",
+        EXPECTED_TRANSPORT_PROPOSAL_SHA256,
+        hashlib.sha256(proposal_bytes).hexdigest(),
+        errors,
+    )
+    options_text = SERIAL_OPTIONS_PATH.read_text(encoding="utf-8")
+    capacity_text = SERIAL_CAPACITY_PATH.read_text(encoding="utf-8")
+
+    allowed_baud_rates = parse_yaml_int_list(
+        proposal_text,
+        "allowed_baud_rates_bps",
+    )
+    csharp_baud_rates = parse_csharp_int_array(
+        options_text,
+        "SupportedBaudRateValues",
+    )
+    require_equal(
+        "transport proposal baud-rate set",
+        allowed_baud_rates,
+        csharp_baud_rates,
+        errors,
+    )
+    require_unique(
+        "transport proposal baud rates",
+        {str(value): value for value in allowed_baud_rates},
+        errors,
+    )
+
+    proposal_default = parse_int_scalar(
+        proposal_text,
+        "default_baud_rate_bps",
+    )
+    upstream_default = parse_int_scalar(
+        proposal_text,
+        "current_fixed_baud_rate_bps",
+    )
+    pinned_protocol_default = parse_int_scalar(
+        protocol_text,
+        "baud_rate_bps",
+    )
+    csharp_default = parse_any_csharp_int_constant(
+        options_text,
+        "DefaultBaudRate",
+    )
+    require_equal(
+        "pinned protocol default baud rate",
+        pinned_protocol_default,
+        upstream_default,
+        errors,
+    )
+    require_equal(
+        "transport proposal default baud rate",
+        proposal_default,
+        csharp_default,
+        errors,
+    )
+    if proposal_default not in allowed_baud_rates:
+        errors.append("transport proposal default baud rate is not allowed")
+
+    bits_per_byte = parse_int_scalar(
+        proposal_text,
+        "bits_per_uart_byte",
+    )
+    utilization = parse_int_scalar(
+        proposal_text,
+        "maximum_line_utilization_percent",
+    )
+    telemetry_frame_size = parse_int_scalar(
+        proposal_text,
+        "telemetry_frame_size_bytes",
+    )
+    preferred_interval = parse_int_scalar(
+        proposal_text,
+        "preferred_stream_interval_us",
+    )
+    maximum_interval = parse_int_scalar(
+        proposal_text,
+        "maximum_stream_interval_us",
+    )
+    require_equal(
+        "UART bits per byte",
+        bits_per_byte,
+        parse_any_csharp_int_constant(capacity_text, "BitsPerUartByte"),
+        errors,
+    )
+    require_equal(
+        "UART maximum line utilization",
+        utilization,
+        parse_any_csharp_int_constant(
+            capacity_text,
+            "MaximumLineUtilizationPercent",
+        ),
+        errors,
+    )
+    computed_frame_size = (
+        parse_int_scalar(protocol_text, "minimum_frame_size_bytes")
+        + parse_csharp_constant(constants_text, "TelemetryPayloadSize")
+    )
+    require_equal(
+        "telemetry frame size",
+        telemetry_frame_size,
+        computed_frame_size,
+        errors,
+    )
+    require_equal(
+        "preferred stream interval",
+        preferred_interval,
+        parse_csharp_constant(constants_text, "DefaultStreamIntervalUs"),
+        errors,
+    )
+    require_equal(
+        "proposal maximum stream interval",
+        maximum_interval,
+        parse_csharp_constant(constants_text, "MaximumStreamIntervalUs"),
+        errors,
+    )
+
+    required_fragments = (
+        "status: pending_system_authority_update",
+        "behavior: auto_increase_interval_or_reject_streaming",
+    )
+    for fragment in required_fragments:
+        if fragment not in proposal_text:
+            errors.append(
+                f"transport-profile-proposal.yaml is missing: {fragment}"
+            )
 
 
 def crc16_ccitt_false(data: bytes) -> int:
@@ -349,6 +539,11 @@ def main() -> int:
     require_unique("device states", states, errors)
 
     validate_authority_lock(errors)
+    validate_transport_profile_proposal(
+        protocol_text,
+        constants_text,
+        errors,
+    )
 
     sof_match = re.search(
         r"bytes:\s*\[(0x[0-9A-Fa-f]+),\s*(0x[0-9A-Fa-f]+)\]",

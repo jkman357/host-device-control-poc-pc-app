@@ -40,7 +40,7 @@ public sealed class SerialTransportOptions
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(portName);
 
-        if (Array.BinarySearch(SupportedBaudRateValues, baudRate) < 0)
+        if (!IsSupportedBaudRate(baudRate))
         {
             throw new ArgumentOutOfRangeException(
                 nameof(baudRate),
@@ -83,6 +83,15 @@ public sealed class SerialTransportOptions
     /// </summary>
     public static IReadOnlyList<int> SupportedBaudRates { get; } =
         Array.AsReadOnly(SupportedBaudRateValues);
+
+    /// <summary>
+    /// Returns whether the baud rate is part of the controlled host-side
+    /// transport proposal. Physical support remains a bring-up responsibility.
+    /// </summary>
+    public static bool IsSupportedBaudRate(int baudRate)
+    {
+        return Array.BinarySearch(SupportedBaudRateValues, baudRate) >= 0;
+    }
 
     public string PortName { get; }
 

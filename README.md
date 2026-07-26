@@ -6,8 +6,8 @@ Windows WPF Coordinator application for the NUCLEO-F446RE host-device-control pr
 
 ## Status
 
-**v0.3.6 selectable UART baud-rate candidate**, based on PC application commit
-`19bac103c6468ec50d15239ad1feed12e44541d4`.
+**v0.3.7 baud-capacity governance candidate**, based on PC application commit
+`cf229be58b4ae15969ef447083d9c5982ff19ee7`.
 
 The wire contract is owned by `host-device-control-poc-system`, not by this repository:
 
@@ -64,11 +64,12 @@ All remain **Draft for Review**. Project-local adoption and deviations are recor
 - transport-independent, generation-owned `DeviceSession`;
 - protocol and Node state separated from WPF presentation state;
 - bounded receive, pending-command, UI telemetry, diagnostic, and recorder work;
-- 200 Hz acquisition with a bounded 50 ms WPF presentation batch;
+- baud-aware acquisition: 200 Hz at 115200 baud or faster, automatically reduced at lower stream-capable rates;
 - visible CRC, format, unknown-ID, partial-frame, sample-loss, UI-drop, and recorder-drop counters;
 - bounded Fake Device with CRC corruption, sample loss, command delay, response suppression, timeout, and cancellation injection;
-- exact authority-mirror hashing and YAML-to-C# identity validation;
-- one transport-owned supported baud-rate set shared by validation, tests, and the WPF selector.
+- exact authority-mirror hashing plus transport-proposal-to-C# validation;
+- one controlled baud-rate proposal shared by validation, transport code, tests, and the WPF selector;
+- an 80% UART line-utilization ceiling that increases the stream interval or disables streaming.
 
 ## Prerequisites
 
@@ -117,7 +118,7 @@ delivery, and WPF rendering.
    `115200`.
 4. Confirm that the MCU UART configuration and USB-UART/VCP adapter support the
    same baud rate.
-5. Connect, verify DEVICE_INFO, configure 5000 us streaming, and start telemetry.
+5. Connect and verify DEVICE_INFO. The application uses 5000 us at 115200 baud or faster, increases the interval at lower stream-capable rates, and disables streaming when the capacity policy cannot fit a frame within 60000 us.
 6. Execute and retain the checks in `docs/Bringup_Checklist.md`.
 
 Supported selections:
@@ -127,8 +128,12 @@ Supported selections:
 230400, 460800, 921600
 ```
 
-The selector is locked while a session is active. Windows and the physical adapter
-may still reject a selected rate that the driver or hardware cannot provide.
+The selector is locked while a session is active. Under the 80% line-utilization
+policy, 1200, 2400, and 4800 baud are command-only; 9600 through 57600 use an
+automatically increased interval; 115200 and faster retain the 5000 us default.
+Windows and the physical adapter may still reject a rate that the driver or hardware
+cannot provide. The selectable-rate profile remains a pending system-authority
+proposal; the pinned upstream profile still names 115200 as its fixed rate.
 
 ## Repository structure
 
@@ -139,7 +144,8 @@ src/
   HostDeviceControl.Transport.Fake/   bounded Node simulator and fault injection
   HostDeviceControl.Transport.Serial/ Windows serial adapter
 tests/
-  HostDeviceControl.Protocol.Tests/   executable engineering tests
+  HostDeviceControl.Protocol.Tests/          cross-platform protocol/core tests
+  HostDeviceControl.Transport.Serial.Tests/ Windows serial/capacity tests
 tools/
   validate_project.py                 repository validator entry point
   validate_protocol_contract.py       authority hash/YAML/C#/vector checks
@@ -147,6 +153,7 @@ tools/
 protocol/
   authority-lock.yaml                 pinned external authority provenance
   protocol.yaml                       exact offline mirror; not local authority
+  transport-profile-proposal.yaml     pending selectable-rate/capacity proposal
   test-vectors/                       exact system normative vectors
 docs/
   Protocol_Decisions.md
@@ -156,6 +163,7 @@ docs/
   UI_Engineering_Profile.md
   Testing_Strategy.md
   Bringup_Checklist.md
+  System_Transport_Profile_Change_Proposal.md
 ```
 
 ## Responsibility boundaries

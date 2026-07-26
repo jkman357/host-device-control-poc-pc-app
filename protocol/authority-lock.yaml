@@ -13,5 +13,11 @@ protocol_authority:
   sha256: 7ff8db3a1ed669407e0d4cada2a78b212ea3c7bccdf371f232a2689a02e7c56e
 implementation:
   repository: host-device-control-poc-pc-app
-  base_commit: 19bac103c6468ec50d15239ad1feed12e44541d4
-  alignment_status: implementation_candidate_pending_ci_and_hardware_evidence
+  base_commit: cf229be58b4ae15969ef447083d9c5982ff19ee7
+  alignment_status: implementation_candidate_with_transport_profile_change_pending_system_authority
+
+transport_profile_change:
+  proposal: protocol/transport-profile-proposal.yaml
+  status: pending_system_authority_update
+  sha256: 6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310
+  rule: pinned_protocol_mirror_remains_unchanged_until_human_approved_upstream_commit

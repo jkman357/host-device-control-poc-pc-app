@@ -38,3 +38,14 @@ The C# encoder, parser, state handling, fake Node, and normative vector checks c
 establish PC implementation alignment. Hardware interoperability, MCU alignment,
 and promotion to `verified_baseline` remain external gates owned by the system
 repository and human approval.
+
+
+## Pending selectable-baud transport proposal
+
+The exact pinned system mirror still defines 115200 baud. This candidate does not
+rewrite that mirror. Instead, `protocol/transport-profile-proposal.yaml` records the
+requested eleven-rate set, 115200 default, 8-N-1 framing, and 80% line-utilization
+policy for upstream review. At runtime, 1200/2400/4800 are command-only, lower
+stream-capable rates receive an increased interval, and 115200 or faster retains the
+5000 us preference. Promotion requires a human-approved system-repository change and
+matching MCU implementation.

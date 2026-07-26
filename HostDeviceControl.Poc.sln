@@ -12,6 +12,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostDeviceControl.Transport
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostDeviceControl.Protocol.Tests", "tests\HostDeviceControl.Protocol.Tests\HostDeviceControl.Protocol.Tests.csproj", "{3E305B05-E7A5-498C-B3BA-B6479A42B3B0}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HostDeviceControl.Transport.Serial.Tests", "tests\HostDeviceControl.Transport.Serial.Tests\HostDeviceControl.Transport.Serial.Tests.csproj", "{2A77D812-981F-43C6-8456-1236EA45E700}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,6 +40,10 @@ Global
 		{3E305B05-E7A5-498C-B3BA-B6479A42B3B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3E305B05-E7A5-498C-B3BA-B6479A42B3B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3E305B05-E7A5-498C-B3BA-B6479A42B3B0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2A77D812-981F-43C6-8456-1236EA45E700}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2A77D812-981F-43C6-8456-1236EA45E700}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2A77D812-981F-43C6-8456-1236EA45E700}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2A77D812-981F-43C6-8456-1236EA45E700}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

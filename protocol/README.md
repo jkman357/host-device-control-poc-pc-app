@@ -19,3 +19,12 @@ this mirror, lock, derived C# implementation, normative vectors, and evidence.
 
 Protocol v0.1.0 / wire version 0x01 remains `candidate_for_alignment`. A successful
 PC build or fake-device run does not promote it to `verified_baseline`.
+
+## Pending serial transport-profile change
+
+`transport-profile-proposal.yaml` records the requested selectable baud-rate set and
+capacity policy. Its controlled SHA-256 is
+`6d7d62f88f0b7b62e6a1468dba0ae9797447a1e295848f4bce8d5eda21645310`. It is deliberately separate from the exact pinned protocol mirror.
+The proposal does not become system authority until a human-approved change is
+committed to `host-device-control-poc-system`, after which the mirror, lock, PC, MCU,
+and evidence must be updated together. The current upstream default remains 115200.
